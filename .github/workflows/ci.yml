@@ -34,4 +34,39 @@ jobs:
           cache: maven
 
       - name: Build and test
+        id: build
         run: mvn --batch-mode --no-transfer-progress clean verify
+
+      - name: Publish build summary
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          if [[ "$BUILD_OUTCOME" == "success" ]]; then
+            status="✅ Passed"
+          else
+            status="❌ ${BUILD_OUTCOME^}"
+          fi
+
+          {
+            echo "## Maven build summary"
+            echo
+            echo "| Item | Result |"
+            echo "| --- | --- |"
+            echo "| Build | $status |"
+            echo "| Java | 17 (Temurin) |"
+            echo "| Commit | \`${GITHUB_SHA:0:7}\` |"
+
+            shopt -s nullglob
+            reports=(target/surefire-reports/TEST-*.xml)
+            if (( ${#reports[@]} > 0 )); then
+              tests=$(grep -h '<testsuite ' "${reports[@]}" | sed -n 's/.* tests="\([0-9]*\)".*/\1/p' | awk '{ total += $1 } END { print total + 0 }')
+              failures=$(grep -h '<testsuite ' "${reports[@]}" | sed -n 's/.* failures="\([0-9]*\)".*/\1/p' | awk '{ total += $1 } END { print total + 0 }')
+              errors=$(grep -h '<testsuite ' "${reports[@]}" | sed -n 's/.* errors="\([0-9]*\)".*/\1/p' | awk '{ total += $1 } END { print total + 0 }')
+              skipped=$(grep -h '<testsuite ' "${reports[@]}" | sed -n 's/.* skipped="\([0-9]*\)".*/\1/p' | awk '{ total += $1 } END { print total + 0 }')
+
+              echo "| Tests | $tests total, $failures failed, $errors errors, $skipped skipped |"
+            else
+              echo "| Tests | No Surefire reports found |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
