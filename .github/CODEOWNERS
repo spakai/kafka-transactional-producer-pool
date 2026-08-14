@@ -1,0 +1,10 @@
+# Human approval required for MCP configuration
+/.github/mcp.json @spakai
+
+
+# Human approval required for the guardrail workflow
+/.github/workflows/guardrail-policy-check.yml @spakai
+
+
+# Copilot must not weaken this ownership policy
+/.github/CODEOWNERS @spakai
