@@ -1,0 +1,14 @@
+{
+  "experimentId":"exp-2",
+  "hypothesis":"Replica loss does not churn healthy producers",
+  "hypothesisFamily":"AF-02A",
+  "faultType":"STOP_NON_LEADER_BROKER",
+  "brokerId":1,
+  "targetPartition":0,
+  "startAfterSeconds":15,
+  "faultDurationSeconds":20,
+  "threads":4,
+  "recordsPerTransaction":5,
+  "observeForSeconds":30,
+  "expectedSignals":"pool_health,transaction_outcome_total,cluster_state"
+}

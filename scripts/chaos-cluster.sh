@@ -8,6 +8,7 @@ topic="chaos-perf-test"
 case "${1:-}" in
   up)
     docker compose -f "$compose_file" up -d --wait
+    ./scripts/chaos-network.sh init
     docker compose -f "$compose_file" exec -T kafka-1 \
       /opt/kafka/bin/kafka-topics.sh \
       --bootstrap-server localhost:9092 \
@@ -23,6 +24,7 @@ case "${1:-}" in
     ;;
   status)
     docker compose -f "$compose_file" ps
+    ./scripts/chaos-network.sh status
     docker compose -f "$compose_file" exec -T kafka-1 \
       /opt/kafka/bin/kafka-topics.sh \
       --bootstrap-server localhost:9092 \

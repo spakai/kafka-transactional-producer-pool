@@ -239,7 +239,9 @@ CSV output is written to `perf-results/`. See [`perf-results/summary.md`](perf-r
 ## Multi-broker chaos harness
 
 Spec 004 is implemented as an opt-in Maven profile and a disposable three-broker
-Kafka environment. Start the cluster and create the replicated test topic:
+Kafka environment. See [CHAOS.md](CHAOS.md) for the complete operational
+runbook, network fault commands, emergency healing, deterministic replays, and
+teardown. Start the cluster and create the replicated test topic:
 
 ```bash
 ./scripts/chaos-cluster.sh up
@@ -300,6 +302,77 @@ cross-cluster failover, production-scale capacity, or automatic resolution of
 ambiguous commits. Network-partition scenarios additionally require an
 environment-specific proxy or firewall fault command.
 
+## Agentic fault-injection campaigns
+
+Spec 007 adds a deterministic, state-aware campaign runner over the existing
+chaos primitives. It uses an in-process rule-based planner; it does not require
+an external AI service or third-party chaos product. Proposed experiments pass
+through a typed policy engine before the controller can execute them, and
+correctness results are decided by the existing publish-ledger verifier.
+
+Compile and test the isolated profile:
+
+```bash
+mvn -Pagentic test
+mvn -Pagentic compile exec:java -Dexec.args="--dry-run true"
+```
+
+A real campaign requires both opt-ins, a disposable environment label, and the
+exact ID of the local three-broker cluster:
+
+```bash
+CLUSTER_ID="$(./scripts/chaos-cluster.sh cluster-id)"
+
+mvn -Pagentic compile exec:java \
+  -Dexec.args="--agentic-enabled true --chaos-enabled true \
+  --environment-label disposable --cluster-allowlist ${CLUSTER_ID} \
+  --campaign-duration-sec 600 --max-experiments 3"
+```
+
+Without network commands, the policy permits only baseline and broker
+stop/start experiments. Network and commit-response proposals are rejected
+unless the corresponding injection command and `--heal-network-command` are
+provided. The runner never generates or executes arbitrary commands.
+
+The Docker chaos stack includes Toxiproxy and initializes one proxy per Kafka
+external listener. Enable the Spec 007 network scenarios with these bounded
+repository commands:
+
+```bash
+NETWORK_ARGS="--partition-broker-command './scripts/chaos-network.sh partition-broker {brokerId}' \
+--partition-cluster-command './scripts/chaos-network.sh partition-cluster' \
+--commit-response-command './scripts/chaos-network.sh drop-responses' \
+--heal-network-command './scripts/chaos-network.sh heal'"
+```
+
+`partition-broker` blocks both directions for one external broker listener;
+`partition-cluster` blocks all producer-to-cluster traffic; and
+`drop-responses` blocks downstream traffic after requests can reach Kafka.
+Healing removes every fault toxic idempotently. Inspect the active proxy rules
+with `./scripts/chaos-network.sh status`.
+
+Deterministic replay fixtures for the partial and full network partitions are
+stored with Spec 007 and still require all authorization flags:
+
+```bash
+mvn -Pagentic compile exec:java \
+  -Dexec.args="--agentic-enabled true --chaos-enabled true \
+  --environment-label disposable --cluster-allowlist ${CLUSTER_ID} \
+  --replay specs/007-agentic-producer-fault-injection/replay-partition-broker.json \
+  ${NETWORK_ARGS}"
+```
+
+Campaign evidence is stored below `agentic-results/<campaign-id>/`, including
+events, per-experiment samples, deterministic results, and `replay.json`. Replay
+still requires the full authorization and policy checks:
+
+```bash
+mvn -Pagentic compile exec:java \
+  -Dexec.args="--agentic-enabled true --chaos-enabled true \
+  --environment-label disposable --cluster-allowlist ${CLUSTER_ID} \
+  --replay agentic-results/<campaign-id>/experiments/exp-1/replay.json"
+```
+
 ## Spring Kafka transactional baseline
 
 Spec 005 adds an opt-in `spring-baseline` profile; Spring Kafka is not a
@@ -336,6 +409,7 @@ src/main/java/com/kafka/producer/pool/   Pool implementation and public API
 src/test/java/com/kafka/producer/pool/   Unit tests
 src/perf/java/com/kafka/producer/perf/   Load scenarios and JMH benchmark
 src/chaos/java/com/kafka/producer/chaos/ Multi-broker and chaos test harness
+src/agentic/java/com/kafka/producer/agentic/ Policy-bounded campaign runner
 src/baseline/java/com/kafka/producer/baseline/ Spring comparison harness
 specs/                                   Functional and performance specifications
 perf-results/                            Checked-in benchmark output
@@ -345,3 +419,4 @@ perf-results/                            Checked-in benchmark output
 
 - [`specs/001-pooled-kafka-producer/spec.md`](specs/001-pooled-kafka-producer/spec.md)
 - [`specs/002-performance-testing/spec.md`](specs/002-performance-testing/spec.md)
+- [`specs/007-agentic-producer-fault-injection/spec.md`](specs/007-agentic-producer-fault-injection/spec.md)

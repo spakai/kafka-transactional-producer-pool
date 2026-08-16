@@ -6,11 +6,13 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -31,8 +33,8 @@ public final class CorrectnessVerifier {
     }
 
     public VerificationReport verify(String runId, PublishLedger ledger) {
-        Map<String, ObservedPublish> observed = readCommitted(runId);
         List<PublishLedger.Entry> ledgerEntries = new ArrayList<>(ledger.entries());
+        Map<String, ObservedPublish> observed = readCommitted(runId, ledgerEntries);
         Map<String, PublishLedger.Entry> byId = ledgerEntries.stream()
                 .collect(Collectors.toMap(PublishLedger.Entry::publishId, Function.identity()));
 
@@ -78,7 +80,11 @@ public final class CorrectnessVerifier {
                 orderingViolations, issues, rows);
     }
 
-    private Map<String, ObservedPublish> readCommitted(String runId) {
+    private Map<String, ObservedPublish> readCommitted(
+            String runId, List<PublishLedger.Entry> ledgerEntries) {
+        if (ledgerEntries.isEmpty()) {
+            return Map.of();
+        }
         Properties properties = new Properties();
         properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, config.bootstrapServers());
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
@@ -90,6 +96,9 @@ public final class CorrectnessVerifier {
         properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         properties.put(ConsumerConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, "30000");
+        properties.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "10000");
+        properties.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, String.valueOf(100 * 1024 * 1024));
+        properties.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, String.valueOf(10 * 1024 * 1024));
 
         Map<String, ObservedPublish> result = new HashMap<>();
         try (Consumer<byte[], byte[]> consumer = new KafkaConsumer<>(properties)) {
@@ -98,14 +107,15 @@ public final class CorrectnessVerifier {
                     .map(info -> new TopicPartition(info.topic(), info.partition()))
                     .toList();
             consumer.assign(partitions);
-            consumer.seekToBeginning(partitions);
             Map<TopicPartition, Long> endOffsets = consumer.endOffsets(partitions);
+            seekToExperimentWindow(consumer, partitions, endOffsets, ledgerEntries);
 
             long deadline = System.nanoTime() + Duration.ofMinutes(2).toNanos();
             while (!reachedEnd(consumer, endOffsets)) {
                 if (System.nanoTime() >= deadline) {
                     throw new IllegalStateException(
-                            "Timed out reading committed records through captured end offsets");
+                            "Timed out reading committed records through captured end offsets: "
+                                    + remainingOffsets(consumer, endOffsets));
                 }
                 ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ofMillis(500));
                 for (ConsumerRecord<byte[], byte[]> record : records) {
@@ -133,6 +143,27 @@ public final class CorrectnessVerifier {
         return result;
     }
 
+    private static void seekToExperimentWindow(
+            Consumer<byte[], byte[]> consumer,
+            List<TopicPartition> partitions,
+            Map<TopicPartition, Long> endOffsets,
+            List<PublishLedger.Entry> ledgerEntries) {
+        long firstAttemptMillis = ledgerEntries.stream()
+                .map(PublishLedger.Entry::attemptedAt)
+                .min(Instant::compareTo)
+                .orElseThrow()
+                .minusSeconds(5)
+                .toEpochMilli();
+        Map<TopicPartition, Long> timestamps = partitions.stream()
+                .collect(Collectors.toMap(Function.identity(), ignored -> firstAttemptMillis));
+        Map<TopicPartition, OffsetAndTimestamp> offsets =
+                consumer.offsetsForTimes(timestamps, Duration.ofSeconds(30));
+        for (TopicPartition partition : partitions) {
+            OffsetAndTimestamp offset = offsets.get(partition);
+            consumer.seek(partition, offset == null ? endOffsets.get(partition) : offset.offset());
+        }
+    }
+
     private static boolean reachedEnd(
             Consumer<byte[], byte[]> consumer, Map<TopicPartition, Long> endOffsets) {
         for (Map.Entry<TopicPartition, Long> end : endOffsets.entrySet()) {
@@ -141,6 +172,18 @@ public final class CorrectnessVerifier {
             }
         }
         return true;
+    }
+
+    private static Map<TopicPartition, String> remainingOffsets(
+            Consumer<byte[], byte[]> consumer, Map<TopicPartition, Long> endOffsets) {
+        Map<TopicPartition, String> remaining = new HashMap<>();
+        for (Map.Entry<TopicPartition, Long> end : endOffsets.entrySet()) {
+            long position = consumer.position(end.getKey());
+            if (position < end.getValue()) {
+                remaining.put(end.getKey(), position + "/" + end.getValue());
+            }
+        }
+        return remaining;
     }
 
     private static String header(ConsumerRecord<byte[], byte[]> record, String name) {
