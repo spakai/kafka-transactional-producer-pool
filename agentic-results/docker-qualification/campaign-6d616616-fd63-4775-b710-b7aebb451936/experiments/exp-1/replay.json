@@ -1,0 +1,14 @@
+{
+  "experimentId":"exp-1",
+  "hypothesis":"Healthy load remains bounded",
+  "hypothesisFamily":"AF-01",
+  "faultType":"NONE",
+  "brokerId":-1,
+  "targetPartition":0,
+  "startAfterSeconds":15,
+  "faultDurationSeconds":0,
+  "threads":4,
+  "recordsPerTransaction":5,
+  "observeForSeconds":30,
+  "expectedSignals":"pool_health,transaction_outcome_total,cluster_state"
+}

@@ -1,0 +1,11 @@
+package com.kafka.producer.agentic;
+
+public enum FaultType {
+    NONE,
+    STOP_NON_LEADER_BROKER,
+    STOP_LEADER_BROKER,
+    PARTITION_PRODUCER_FROM_ONE_BROKER,
+    PARTITION_PRODUCER_FROM_CLUSTER,
+    FLAP_PRODUCER_NETWORK,
+    DROP_COMMIT_RESPONSE
+}

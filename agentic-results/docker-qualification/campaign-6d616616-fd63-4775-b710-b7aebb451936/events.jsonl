@@ -1,0 +1,22 @@
+{"timestamp":"2026-08-16T04:37:46.677014869Z","type":"policy","outcome":"approved","detail":"exp-1"}
+{"timestamp":"2026-08-16T04:38:36.237201172Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running"}
+{"timestamp":"2026-08-16T04:38:40.920824931Z","type":"policy","outcome":"approved","detail":"exp-2"}
+{"timestamp":"2026-08-16T04:38:58.895943782Z","type":"cleanup","outcome":"registered","detail":"exp-2"}
+{"timestamp":"2026-08-16T04:38:58.896633794Z","type":"broker-stop","outcome":"requested","detail":"kafka-pool-chaos-1"}
+{"timestamp":"2026-08-16T04:39:04.070512025Z","type":"broker-stop","outcome":"applied","detail":"kafka-pool-chaos-1"}
+{"timestamp":"2026-08-16T04:39:04.070614306Z","type":"fault","outcome":"confirmed","detail":"STOP_NON_LEADER_BROKER"}
+{"timestamp":"2026-08-16T04:39:19.101002691Z","type":"broker-start","outcome":"requested","detail":"kafka-pool-chaos-1"}
+{"timestamp":"2026-08-16T04:39:19.245928684Z","type":"broker-start","outcome":"applied","detail":"kafka-pool-chaos-1"}
+{"timestamp":"2026-08-16T04:39:28.565719404Z","type":"broker-ready","outcome":"confirmed","detail":"kafka-pool-chaos-1"}
+{"timestamp":"2026-08-16T04:39:28.565729019Z","type":"fault","outcome":"healed","detail":"STOP_NON_LEADER_BROKER"}
+{"timestamp":"2026-08-16T04:39:51.692752139Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running"}
+{"timestamp":"2026-08-16T04:40:25.096316728Z","type":"policy","outcome":"approved","detail":"exp-3"}
+{"timestamp":"2026-08-16T04:40:43.224758176Z","type":"cleanup","outcome":"registered","detail":"exp-3"}
+{"timestamp":"2026-08-16T04:40:43.224812060Z","type":"broker-stop","outcome":"requested","detail":"kafka-pool-chaos-3"}
+{"timestamp":"2026-08-16T04:40:46.379011146Z","type":"broker-stop","outcome":"applied","detail":"kafka-pool-chaos-3"}
+{"timestamp":"2026-08-16T04:40:46.379021464Z","type":"fault","outcome":"confirmed","detail":"STOP_LEADER_BROKER"}
+{"timestamp":"2026-08-16T04:41:05.888664976Z","type":"broker-start","outcome":"requested","detail":"kafka-pool-chaos-3"}
+{"timestamp":"2026-08-16T04:41:06.037692088Z","type":"broker-start","outcome":"applied","detail":"kafka-pool-chaos-3"}
+{"timestamp":"2026-08-16T04:41:12.869326030Z","type":"broker-ready","outcome":"confirmed","detail":"kafka-pool-chaos-3"}
+{"timestamp":"2026-08-16T04:41:12.869335630Z","type":"fault","outcome":"healed","detail":"STOP_LEADER_BROKER"}
+{"timestamp":"2026-08-16T04:41:38.497202494Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running"}

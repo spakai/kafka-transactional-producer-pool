@@ -1,0 +1,14 @@
+{
+  "experimentId":"exp-network-cluster",
+  "hypothesis":"A full partition produces bounded backpressure",
+  "hypothesisFamily":"AF-03B",
+  "faultType":"PARTITION_PRODUCER_FROM_CLUSTER",
+  "brokerId":-1,
+  "targetPartition":0,
+  "startAfterSeconds":15,
+  "faultDurationSeconds":15,
+  "threads":8,
+  "recordsPerTransaction":10,
+  "observeForSeconds":30,
+  "expectedSignals":"pool_health,transaction_outcome_total,cluster_state"
+}
