@@ -281,6 +281,126 @@ Only run chaos scenarios against disposable infrastructure. Per-second samples,
 fault events, and publish-ID correctness results are written to `chaos-results/`.
 Stop and remove the local cluster with `./scripts/chaos-cluster.sh down`.
 
+### Transaction failure-injection test plan
+
+The performance harness and the chaos harness answer different questions. **JMH is for
+micro-benchmarking; it is not the primary tool for reproducing Kafka transaction
+failures.** Transaction coordinator outages, fencing, producer epoch changes,
+ambiguous commits, leader failover, packet loss, and delayed responses are
+distributed-systems correctness scenarios and should be tested with deterministic
+integration tests plus controlled fault injection.
+
+Use the following layers:
+
+| Layer | Recommended tool | Purpose |
+|---|---|---|
+| Deterministic correctness | JUnit + a real Kafka broker/Testcontainers | Transaction timeout, duplicate `transactional.id`, producer fencing, invalid timeout configuration, retry/eviction behavior |
+| Network fault injection | Toxiproxy through `scripts/chaos-network.sh` | Delay/drop requests or responses, isolate one broker, isolate the whole cluster, reproduce ambiguous commit outcomes |
+| Infrastructure chaos | Three-broker chaos environment / Kubernetes chaos tooling | Broker crash, coordinator failover, leader election, pod restart, network partition |
+| Performance | JMH and the `perf` profile | Pool overhead, lease contention, transaction hot path, producer-pool sizing and throughput |
+
+#### Failure scenarios to cover
+
+| ID | Failure to reproduce | How to trigger it | Expected behavior |
+|---|---|---|---|
+| TX-01 | `initTransactions()` timeout | Block or delay access to the transaction coordinator and use a bounded `max.block.ms` | Initialization fails within the configured deadline; the slot is not exposed as ready |
+| TX-02 | Transaction coordinator unavailable | Stop/restart the broker currently acting as transaction coordinator | Producer sees a retriable coordinator error or timeout; pool follows bounded retry/recovery policy |
+| TX-03 | Coordinator failover during transaction | Start a transaction, publish records, then restart the coordinator broker | No partial committed transaction is visible to `read_committed` consumers |
+| TX-04 | Producer fenced by a newer epoch | Start Producer A with `transactional.id=X`, then initialize Producer B with the same ID | A becomes stale/fenced and must be treated as fatal, evicted, and never reused |
+| TX-05 | Stale producer attempts commit | Fence Producer A as in TX-04, then call `send()` or `commitTransaction()` from A | Fatal fencing/epoch error; do not blindly retry using the stale producer |
+| TX-06 | Transaction timeout | `beginTransaction()`, publish, wait longer than `transaction.timeout.ms`, then commit | Transaction is aborted/fails and no partial data becomes visible |
+| TX-07 | Invalid transaction timeout configuration | Set producer `transaction.timeout.ms` above broker `transaction.max.timeout.ms` | Initialization fails deterministically with configuration/timeout validation error |
+| TX-08 | Produce request timeout | Delay/drop produce traffic or isolate the partition leader during a transaction | Retriable/fatal classification matches Kafka semantics; pool never reports an unverified success |
+| TX-09 | Leader failure during large transaction | Publish a large transaction and stop the leader broker mid-send | Kafka elects a replacement; transaction either completes safely or fails without partial committed visibility |
+| TX-10 | Commit request does not reach coordinator | Partition the producer from the cluster immediately before `commitTransaction()` | Commit fails/times out; caller receives failure and no success is inferred |
+| TX-11 | Commit succeeds but response is lost | Allow the commit request to reach Kafka, then drop downstream broker responses | Producer observes an **ambiguous commit outcome**; application must not blindly replay the same logical transaction |
+| TX-12 | Metadata unavailable | Block all brokers before or during metadata refresh | Calls fail within configured bounds; pool does not hang indefinitely |
+| TX-13 | Producer buffer exhaustion | Use small `buffer.memory`, slow broker/network, and high publish concurrency | Backpressure/timeout is surfaced; pool health and lease metrics remain consistent |
+| TX-14 | Broker throttling / high latency | Apply broker quota or network latency | Throughput degrades predictably without transactional correctness violations |
+
+The most important epoch/fencing test is intentionally simple:
+
+```text
+Producer A
+transactional.id = rerating-job-123
+initTransactions()
+beginTransaction()
+send(...)
+
+        |
+        v
+
+Producer B starts
+transactional.id = rerating-job-123
+initTransactions()
+
+        |
+        v
+
+Kafka assigns B the newer producer epoch.
+Producer A is now stale/fenced.
+
+        |
+        v
+
+Producer A calls send() or commitTransaction().
+
+Expected:
+- fatal fencing/epoch failure;
+- Producer A is evicted;
+- Producer A is never returned to the pool;
+- no automatic replay is attempted using the stale producer.
+```
+
+This also models a pod-restart race: Pod A becomes slow or disconnected, Pod B
+starts with the same transactional identity, and Pod A later resumes. Kafka's
+epoch/fencing mechanism must prevent the stale producer from committing.
+
+#### Ambiguous commit test
+
+A normal timeout test is not enough for `commitTransaction()`. Exercise two
+different cases:
+
+1. **Request lost before Kafka commits.** Block the producer before the commit
+   request reaches the transaction coordinator.
+2. **Kafka commits, response is lost.** Permit producer-to-Kafka traffic but drop
+   Kafka-to-producer responses immediately after the commit request is sent.
+
+Both can look like a timeout to the application, but only the second case may
+already be durably committed. The pool must surface that uncertainty rather than
+claim success or blindly replay the transaction.
+
+For the existing Toxiproxy-backed environment, use the bounded network commands
+documented above. The `drop-responses` toxic is the primary primitive for the
+second case; verify the final result with a `read_committed` consumer and a
+logical publish ID/correlation ID ledger.
+
+#### Suggested execution order
+
+Run transaction-failure coverage in this order:
+
+1. Deterministic fencing, transaction-timeout, and invalid-configuration tests.
+2. Single-broker network faults: initialization timeout, send timeout, metadata
+   loss, and full producer isolation.
+3. Three-broker leader and coordinator restart/failover scenarios.
+4. Ambiguous commit tests with request-loss and response-loss separated.
+5. Long-running soak tests that combine load with bounded broker/network faults.
+6. JMH/performance runs separately, after correctness passes, to measure the cost
+   of the recovery and pooling behavior rather than to create failures.
+
+Every correctness scenario should verify, where applicable:
+
+- only complete committed transactions are visible with
+  `isolation.level=read_committed`;
+- aborted/failed transactions are not visible;
+- no duplicate logical publish IDs are introduced by pool retries;
+- fenced/fatal producers are evicted and replaced;
+- retries are bounded;
+- leases are always released;
+- health and Micrometer counters reflect the failure and recovery path; and
+- ambiguous commit outcomes are surfaced explicitly instead of being converted
+  into a false success.
+
 ### What the chaos tests prove
 
 The validated broker-restart run demonstrated that the producer pool can survive
