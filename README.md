@@ -133,6 +133,189 @@ TransactionalProducerPool pool = new TransactionalProducerPool(
         meterRegistry);
 ```
 
+## Minimum and maximum pool sizing
+
+Use separate minimum and maximum pool sizes so startup safety and operating
+capacity are not treated as the same thing.
+
+- `minPoolSize` is the minimum number of initialized producers required for the
+  pod to be considered capable of serving traffic.
+- `maxPoolSize` is the desired/maximum number of producer slots the pool should
+  maintain during normal operation.
+
+For example:
+
+```text
+minPoolSize = 3
+maxPoolSize = 10
+```
+
+Startup behavior should be:
+
+```text
+Pod starts
+   |
+   v
+Create producers up to maxPoolSize
+   |
+   +--> ready == maxPoolSize
+   |        HEALTHY
+   |        pod starts normally
+   |
+   +--> minPoolSize <= ready < maxPoolSize
+   |        DEGRADED
+   |        pod stays up
+   |        readiness = READY
+   |        alarm/metric raised
+   |        background recovery continues
+   |
+   +--> ready < minPoolSize
+            UNAVAILABLE
+            startup fails
+            pod exits
+            alarm raised
+```
+
+With `minPoolSize=3` and `maxPoolSize=10`:
+
+```text
+10/10 -> HEALTHY
+ 7/10 -> DEGRADED, continue
+ 3/10 -> DEGRADED, continue
+ 2/10 -> startup failure
+ 0/10 -> startup failure
+```
+
+Runtime behavior should be different from startup behavior. A temporary Kafka
+outage should not immediately cause every running application pod to terminate.
+
+```text
+ready >= maxPoolSize
+    HEALTHY
+
+minPoolSize <= ready < maxPoolSize
+    DEGRADED
+    continue serving
+    rebuild missing producer slots
+    raise warning/alarm
+
+ready < minPoolSize
+    UNAVAILABLE
+    readiness = false
+    stop accepting new work
+    keep recovery running
+    raise critical alarm
+```
+
+If desired, a pod may be terminated only after the pool remains below
+`minPoolSize` for a configurable recovery window, for example:
+
+```text
+minPoolSize = 3
+recoveryFailureThreshold = 5
+unavailableGracePeriod = 60s
+```
+
+This avoids a failure mode where a short Kafka outage causes every application
+pod to restart at the same time and increases recovery pressure on Kafka.
+
+### Kubernetes health semantics
+
+Liveness and readiness must not mean the same thing.
+
+```text
+Liveness
+--------
+Is the application process itself functioning?
+
+Temporary Kafka outage:
+liveness = UP
+
+Readiness
+---------
+Can this pod safely process new work?
+
+ready producers >= minPoolSize:
+READY
+
+ready producers < minPoolSize:
+NOT READY
+```
+
+A Kafka outage or producer shortage should normally fail readiness first, not
+liveness. The pod should remain alive long enough to attempt producer recovery.
+
+The pool health model should follow the same contract:
+
+```java
+enum PoolHealth {
+    HEALTHY,       // ready >= maxPoolSize
+    DEGRADED,      // minPoolSize <= ready < maxPoolSize
+    UNAVAILABLE    // ready < minPoolSize
+}
+```
+
+Recommended metrics include:
+
+```text
+producer_pool_ready
+producer_pool_min_size
+producer_pool_max_size
+producer_pool_recovery_failures_total
+producer_pool_slot_rebuild_total
+producer_pool_startup_failures_total
+```
+
+Recommended alarms:
+
+```text
+WARN
+ready < maxPoolSize for a sustained interval
+
+CRITICAL
+ready < minPoolSize
+
+CRITICAL
+pool remains UNAVAILABLE beyond the recovery grace period
+
+CRITICAL
+producer rebuilds repeatedly fail
+```
+
+Recommended logging:
+
+```text
+INFO
+Producer pool initialized
+ready=10 min=3 max=10 health=HEALTHY
+
+WARN
+Producer pool started with reduced capacity
+ready=6 min=3 max=10 health=DEGRADED
+action=background_recovery
+
+ERROR
+Producer pool failed minimum startup requirement
+ready=2 min=3 max=10
+action=startup_failed
+
+WARN
+Producer pool capacity degraded
+previousReady=10 ready=7 min=3 max=10
+action=rebuild_slots
+
+ERROR
+Producer pool unavailable
+ready=2 min=3 max=10
+action=readiness_failed,recovery_continuing
+```
+
+The operational rule is therefore:
+
+> At startup, fail the pod if `minPoolSize` cannot be created. At runtime, if
+> capacity falls below `minPoolSize`, first remove the pod from service, alarm,
+> and continue bounded recovery rather than immediately killing the pod.
+
 ## Health and metrics
 
 Use `pool.getHealth()` for the coarse health state, or inspect `getPoolState()`, `getReadyCount()`, `getLeasedCount()`, and `getTotalCount()` for diagnostics.
