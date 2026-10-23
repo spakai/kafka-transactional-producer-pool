@@ -1,0 +1,11 @@
+{"timestamp":"2026-10-23T06:14:33.252112013Z","type":"run","outcome":"started","detail":"ch-02-9ec6c026-25ea-47f1-89b9-5feeeaa1ae57","attributes":{}}
+{"timestamp":"2026-10-23T06:14:33.601838588Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"leaders":"{chaos-perf-test-10=2, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=3, chaos-perf-test-5=3, chaos-perf-test-8=2, chaos-perf-test-1=3, chaos-perf-test-11=3, chaos-perf-test-4=2, chaos-perf-test-7=3, chaos-perf-test-0=2}","clusterId":"5L6g3nShT-eMCtK--X86sw","offline":"0","underReplicated":"0","brokers":"[1, 2, 3]"}}
+{"timestamp":"2026-10-23T06:14:33.604890514Z","type":"broker-selected","outcome":"confirmed","detail":"network target","attributes":{"brokerId":"3"}}
+{"timestamp":"2026-10-23T06:14:44.887016386Z","type":"network-partition-broker","outcome":"requested","detail":"broker=3","attributes":{}}
+{"timestamp":"2026-10-23T06:14:45.286637126Z","type":"network-partition-broker","outcome":"applied","detail":"broker=3","attributes":{}}
+{"timestamp":"2026-10-23T06:15:04.450155415Z","type":"network-heal","outcome":"requested","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:15:04.975832266Z","type":"network-heal","outcome":"applied","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:15:33.025083731Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-23T06:15:33.052858324Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"leaders":"{chaos-perf-test-10=2, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=3, chaos-perf-test-5=3, chaos-perf-test-8=2, chaos-perf-test-1=3, chaos-perf-test-11=3, chaos-perf-test-4=2, chaos-perf-test-7=3, chaos-perf-test-0=2}","clusterId":"5L6g3nShT-eMCtK--X86sw","offline":"0","underReplicated":"0","brokers":"[1, 2, 3]"}}
+{"timestamp":"2026-10-23T06:15:35.398384782Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-23T06:15:35.399475739Z","type":"run","outcome":"completed","detail":"ch-02-9ec6c026-25ea-47f1-89b9-5feeeaa1ae57","attributes":{}}

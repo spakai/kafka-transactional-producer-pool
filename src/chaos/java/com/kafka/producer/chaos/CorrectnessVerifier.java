@@ -198,7 +198,7 @@ public final class CorrectnessVerifier {
                     if (id == null || sequence == null || index == null) continue;
                     String key = record.key() == null ? "" : new String(record.key(), StandardCharsets.UTF_8);
                     ObservedPublish observed = result.computeIfAbsent(id, ignored -> new ObservedPublish());
-                    observed.add(record.topic(), key, Long.parseLong(sequence),
+                    observed.add(record.topic(), record.partition(), key, Long.parseLong(sequence),
                             Integer.parseInt(index), record.offset());
                 }
             }
@@ -255,10 +255,14 @@ public final class CorrectnessVerifier {
         for (var entry : observed.entrySet()) {
             if (!ledger.containsKey(entry.getKey())) continue;
             entry.getValue().firstOffsets.forEach((topic, offset) -> {
+                String[] topicPartition = topic.split("\u0000", -1);
+                String actualTopic = topicPartition[0];
+                int partition = Integer.parseInt(topicPartition[1]);
                 String key = entry.getValue().keys.get(topic);
                 long seq = entry.getValue().sequences.get(topic);
-                byTopicAndKey.computeIfAbsent(topic + "\u0000" + key, ignored -> new ArrayList<>())
-                        .add(new OrderedPublish(offset, seq, topic, key));
+                byTopicAndKey.computeIfAbsent(actualTopic + "\u0000" + partition + "\u0000" + key,
+                                ignored -> new ArrayList<>())
+                        .add(new OrderedPublish(offset, seq, actualTopic, partition, key));
             });
         }
         int violations = 0;
@@ -268,7 +272,8 @@ public final class CorrectnessVerifier {
             for (OrderedPublish current : group) {
                 if (current.sequence < prior) {
                     violations++;
-                    issues.add("Ordering inversion on topic " + current.topic + " key " + current.key);
+                    issues.add("Ordering inversion on topic " + current.topic + " partition "
+                            + current.partition + " key " + current.key);
                 }
                 prior = current.sequence;
             }
@@ -276,7 +281,7 @@ public final class CorrectnessVerifier {
         return violations;
     }
 
-    private record OrderedPublish(long offset, long sequence, String topic, String key) {}
+    private record OrderedPublish(long offset, long sequence, String topic, int partition, String key) {}
     private record ReadResult(Map<String, ObservedPublish> publishes,
                               Map<TopicPartition, Long> recordsByPartition) {}
 
@@ -292,12 +297,13 @@ public final class CorrectnessVerifier {
             return duplicateIndexes > 0;
         }
         private int duplicateIndexes;
-        private void add(String topic, String key, long sequence, int index, long offset) {
+        private void add(String topic, int partition, String key, long sequence, int index, long offset) {
             Set<Integer> set = indexes.computeIfAbsent(topic, ignored -> new HashSet<>());
             if (!set.add(index)) duplicateIndexes++;
-            firstOffsets.merge(topic, offset, Math::min);
-            keys.put(topic, key);
-            sequences.put(topic, sequence);
+            String topicPartition = topic + "\u0000" + partition;
+            firstOffsets.merge(topicPartition, offset, Math::min);
+            keys.put(topicPartition, key);
+            sequences.put(topicPartition, sequence);
         }
     }
 }

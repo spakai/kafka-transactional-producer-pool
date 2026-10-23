@@ -1,0 +1,13 @@
+topic,partition,read_committed_records
+"chaos-perf-test",11,0
+"chaos-perf-test",4,0
+"chaos-perf-test",7,20360
+"chaos-perf-test",0,10180
+"chaos-perf-test",10,10110
+"chaos-perf-test",3,10260
+"chaos-perf-test",6,10270
+"chaos-perf-test",9,0
+"chaos-perf-test",2,10270
+"chaos-perf-test",5,10270
+"chaos-perf-test",8,0
+"chaos-perf-test",1,0
