@@ -17,31 +17,48 @@ public final class ChaosResultWriter {
             List<ChaosLoadEngine.Sample> samples,
             List<ChaosEvent> events,
             VerificationReport verification) throws IOException {
+        return write(config, runId, samples, events, verification,
+                verification.passed() ? "PASS" : "FAIL", "");
+    }
+
+    public ResultFiles write(
+            ChaosConfig config,
+            String runId,
+            List<ChaosLoadEngine.Sample> samples,
+            List<ChaosEvent> events,
+            VerificationReport verification,
+            String resultStatus,
+            String resultDetail) throws IOException {
         Files.createDirectories(config.resultsDirectory());
         String stem = config.scenario() + "-" + timestamp();
         Path samplesFile = config.resultsDirectory().resolve(stem + ".csv");
         Path eventsFile = config.resultsDirectory().resolve(stem + "-events.jsonl");
         Path verificationFile = config.resultsDirectory().resolve(stem + "-verification.csv");
+        Path offsetsFile = config.resultsDirectory().resolve(stem + "-offsets.csv");
+        Path partitionsFile = config.resultsDirectory().resolve(stem + "-partition-counts.csv");
 
         writeSamples(samplesFile, samples);
         writeEvents(eventsFile, events);
         writeVerification(verificationFile, verification);
-        appendSummary(config, runId, samplesFile, eventsFile, verificationFile, verification);
-        return new ResultFiles(samplesFile, eventsFile, verificationFile);
+        writeOffsets(offsetsFile, verification);
+        writePartitionCounts(partitionsFile, verification);
+        appendSummary(config, runId, samplesFile, eventsFile, verificationFile, offsetsFile,
+                partitionsFile, verification, resultStatus, resultDetail);
+        return new ResultFiles(samplesFile, eventsFile, verificationFile, offsetsFile, partitionsFile);
     }
 
     private static void writeSamples(Path file, List<ChaosLoadEngine.Sample> samples)
             throws IOException {
         try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-            writer.write("timestamp,elapsed_second,attempted,committed,failed,ambiguous,"
+            writer.write("timestamp,elapsed_second,attempted,committed,failed,aborted,ambiguous,"
                     + "p50_latency_ms,p95_latency_ms,p99_latency_ms,pool_state,"
                     + "ready_producers,leased_producers,total_producers,heap_used_mb,"
                     + "under_replicated_partitions,offline_partitions\n");
             for (ChaosLoadEngine.Sample sample : samples) {
                 writer.write(String.format(java.util.Locale.ROOT,
-                        "%s,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%s,%d,%d,%d,%.3f,%d,%d%n",
+                        "%s,%d,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%s,%d,%d,%d,%.3f,%d,%d%n",
                         sample.timestamp(), sample.elapsedSecond(), sample.attempted(),
-                        sample.committed(), sample.failed(), sample.ambiguous(),
+                        sample.committed(), sample.failed(), sample.aborted(), sample.ambiguous(),
                         sample.p50LatencyMs(), sample.p95LatencyMs(), sample.p99LatencyMs(),
                         sample.poolState(), sample.readyProducers(), sample.leasedProducers(),
                         sample.totalProducers(), sample.heapUsedMb(),
@@ -91,11 +108,12 @@ public final class ChaosResultWriter {
     private static void writeVerification(Path file, VerificationReport verification)
             throws IOException {
         try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-            writer.write("publish_id,ledger_outcome,expected_records,observed_records,"
+            writer.write("publish_id,ledger_outcome,expected_records,observed_records,observed_uncommitted_records,"
                     + "callback_attempts,error_class\n");
             for (VerificationReport.VerificationRow row : verification.rows()) {
                 writer.write(csv(row.publishId()) + "," + csv(row.ledgerOutcome()) + ","
                         + row.expectedRecords() + "," + row.observedRecords() + ","
+                        + row.observedUncommittedRecords() + ","
                         + row.callbackAttempts() + "," + csv(row.errorClass()) + "\n");
             }
         }
@@ -105,17 +123,41 @@ public final class ChaosResultWriter {
         return "\"" + value.replace("\"", "\"\"") + "\"";
     }
 
+    private static void writeOffsets(Path file, VerificationReport report) throws IOException {
+        try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+            writer.write("topic,partition,start_offset,end_offset\n");
+            for (var entry : report.offsetRanges().entrySet()) {
+                writer.write(csv(entry.getKey().topic()) + "," + entry.getKey().partition() + ","
+                        + entry.getValue().startOffset() + "," + entry.getValue().endOffset() + "\n");
+            }
+        }
+    }
+
+    private static void writePartitionCounts(Path file, VerificationReport report) throws IOException {
+        try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+            writer.write("topic,partition,read_committed_records\n");
+            for (var e : report.committedRecordsByPartition().entrySet()) {
+                writer.write(csv(e.getKey().topic()) + "," + e.getKey().partition() + "," + e.getValue() + "\n");
+            }
+        }
+    }
+
     private static void appendSummary(
             ChaosConfig config,
             String runId,
             Path samples,
             Path events,
             Path verificationFile,
-            VerificationReport report) throws IOException {
+            Path offsetsFile,
+            Path partitionsFile,
+            VerificationReport report,
+            String resultStatus,
+            String resultDetail) throws IOException {
         Path summary = config.resultsDirectory().resolve("summary.md");
         String text = "\n## " + config.scenario() + " — " + Instant.now() + "\n\n"
                 + "- Run ID: `" + runId + "`\n"
-                + "- Result: **" + (report.passed() ? "PASS" : "FAIL") + "**\n"
+                + "- Result: **" + resultStatus + "**\n"
+                + "- Result detail: " + resultDetail + "\n"
                 + "- Ledger entries: " + report.ledgerEntries() + "\n"
                 + "- Observed publish IDs: " + report.observedPublishIds() + "\n"
                 + "- Missing committed publishes: " + report.missingCommitted() + "\n"
@@ -123,9 +165,20 @@ public final class ChaosResultWriter {
                 + "- Duplicate publish IDs: " + report.duplicatePublishIds() + "\n"
                 + "- Partial transactions: " + report.partialTransactions() + "\n"
                 + "- Ordering violations: " + report.orderingViolations() + "\n"
+                + "- Aborted transactions: " + report.abortedTransactions() + "\n"
+                + "- Aborted visible to read_committed: " + report.abortedVisibleCommitted() + "\n"
+                + "- Aborted records visible to read_uncommitted: " + report.abortedVisibleUncommittedRecords() + "\n"
+                + "- Aborted read_uncommitted mismatches: " + report.abortedUncommittedMismatches() + "\n"
+                + "- Missing abort control samples: " + report.missingAbortControlSamples() + "\n"
+                + "- Cross-topic mismatches: " + report.crossTopicMismatches() + "\n"
+                + "- Ambiguous callback replays: " + report.callbackReplayViolations() + "\n"
+                + "- Pending transactions after drain: " + report.pendingTransactions() + "\n"
+                + "- Under-sampled MB-02 partitions: " + report.underSampledPartitions() + "\n"
                 + "- Samples: `" + samples.getFileName() + "`\n"
                 + "- Events: `" + events.getFileName() + "`\n"
                 + "- Verification: `" + verificationFile.getFileName() + "`\n";
+        text += "- Offset ranges: `" + offsetsFile.getFileName() + "`\n";
+        text += "- Partition counts: `" + partitionsFile.getFileName() + "`\n";
         Files.writeString(summary, text, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
     }
 
@@ -134,5 +187,5 @@ public final class ChaosResultWriter {
                 .replace(":", "-");
     }
 
-    public record ResultFiles(Path samples, Path events, Path verification) {}
+    public record ResultFiles(Path samples, Path events, Path verification, Path offsets, Path partitionCounts) {}
 }

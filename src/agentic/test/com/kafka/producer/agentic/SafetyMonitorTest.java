@@ -11,7 +11,7 @@ class SafetyMonitorTest {
     @Test void abortsOnClusterIdentityChange() {
         SafetyMonitor monitor = new SafetyMonitor("expected");
         var c = TestFixtures.cluster();
-        var sample = new ChaosLoadEngine.Sample(Instant.now(), 0, 0, 0, 0, 0,
+        var sample = new ChaosLoadEngine.Sample(Instant.now(), 0, 0, 0, 0, 0, 0,
                 0, 0, 0, "HEALTHY", 4, 0, 4, 10, 0, 0);
         assertEquals("CLUSTER_ID_CHANGED", monitor.evaluate(c, sample).orElseThrow());
     }

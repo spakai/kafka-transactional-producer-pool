@@ -22,6 +22,14 @@ public final class ExperimentOracle {
             return new ExperimentResult(plan, FailureClass.PRODUCER_RECOVERY_FAILURE,
                     "pool did not reconcile after recovery", true, samples, verification);
         }
+        // The current Toxiproxy hook drops all downstream Kafka traffic and
+        // emits no protocol-level proof that an EndTxn response was targeted.
+        // Never promote this approximation to a CH-05 pass.
+        if (plan.faultType() == FaultType.DROP_COMMIT_RESPONSE) {
+            return new ExperimentResult(plan, FailureClass.INVALID_INCOMPLETE,
+                    "commit-response attempt lacks correlated EndTxn request/response-drop evidence",
+                    true, samples, verification);
+        }
         return new ExperimentResult(plan, FailureClass.PASSED, "all deterministic oracles passed",
                 true, samples, verification);
     }

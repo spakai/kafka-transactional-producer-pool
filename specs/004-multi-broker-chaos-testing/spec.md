@@ -40,6 +40,8 @@ This specification extends spec 002 with:
 - Baseline ownership does not imply that every measurement is a gate. Each scenario below names its hard invariants; throughput and skew remain diagnostic unless a numeric threshold is stated.
 - “Acknowledged” means the transaction callback returned normally after `commitTransaction` completed. A successful `send()` future alone is not a committed transaction.
 - Every transaction must have a run-scoped unique `publish_id`; every record within it has a stable `record_index`. Producer transactional IDs are diagnostic identifiers, not deduplication keys, because pool slots reuse them.
+- The direct harness accepts `--output-topics` as a comma-separated set. It writes each publish's records to every configured topic inside the same transaction. MB-01 injects one intentional abort per ten publishes by default (`--abort-every 0` disables the control sample).
+- The harness captures per-topic partition high-water offsets before load starts and after workers drain. It scans the same bounded ranges under both isolation levels and reports per-partition committed counts.
 
 ### Out of Scope
 
@@ -179,7 +181,7 @@ Every operation shall return a timestamped result and enough evidence to disting
 **Purpose:** verify publishing across partitions led by different brokers.
 
 - Confirm the test topic has leaders distributed across all three brokers.
-- Publish equal keyed traffic to every partition.
+- Publish round-robin keyed traffic to every partition using `--partition-count`.
 - Run for 5 minutes.
 
 **Capture:**
@@ -390,7 +392,9 @@ After each scenario, the verifier shall:
 7. Check sequence gaps/inversions only for an explicitly defined ordering scope (per partition or serialized business key).
 8. Report ambiguous IDs separately; do not automatically classify them as lost, committed, or safe to replay.
 
-The current direct harness verifies only its configured topic and consumes only `read_committed`; until multi-topic and dual-isolation collection is implemented, claims about cross-topic atomicity and `read_uncommitted` outcomes are not gated by this harness.
+The direct harness persists numeric verification totals, per-publish rows, per-partition committed counts, and start/end offset ranges. Agentic campaign artifacts persist the same numeric totals and verification rows. The current Toxiproxy CH-05 implementation remains explicitly invalid/incomplete because it cannot prove a correlated `EndTxn` request and dropped response; protocol-aware injection is still required before CH-05 can pass.
+
+The earlier AF-05 artifact was produced before the protocol-proof gate existed. Its `PASSED` label is historical and must be interpreted as invalid/incomplete CH-05 evidence under this specification.
 
 The verifier shall retain raw evidence for every failed assertion.
 

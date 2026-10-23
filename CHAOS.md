@@ -149,7 +149,32 @@ CLUSTER_ID="$(./scripts/chaos-cluster.sh cluster-id)"
 ```
 
 `up` waits for all services, initializes the three proxies, and creates the
-12-partition, replication-factor-3 topic with `min.insync.replicas=2`.
+12-partition, replication-factor-3 publish and audit topics with
+`min.insync.replicas=2`. MB-01 enables one intentional abort sample per ten
+publishes by default; override with `--abort-every 0` to disable it.
+
+For CH-01, prepare a disposable topic with a deterministic preferred-leader
+imbalance. The assignment gives broker 1 six preferred leaders and brokers 2
+and 3 three each:
+
+```bash
+./scripts/chaos-cluster.sh prepare-ch01
+```
+
+Example baseline invocations (use the printed cluster ID and disposable-cluster
+authorization flags for fault scenarios):
+
+```bash
+mvn -Pchaos compile exec:java -Dexec.args="--scenario MB-01 --duration-sec 120 --output-topics chaos-perf-test,chaos-audit-test --results-dir chaos-results"
+mvn -Pchaos compile exec:java -Dexec.args="--scenario MB-02 --duration-sec 120 --partition-count 12 --output-topics chaos-perf-test,chaos-audit-test --results-dir chaos-results"
+mvn -Pchaos compile exec:java -Dexec.args="--scenario CH-01 --topic chaos-ch01-leader-heavy --duration-sec 600 --fault-at-sec 180 --fault-duration-sec 60 --chaos-enabled true --cluster-allowlist ${CLUSTER_ID} --results-dir chaos-results"
+mvn -Pchaos compile exec:java -Dexec.args="--scenario CH-04 --duration-sec 240 --fault-at-sec 20 --chaos-enabled true --cluster-allowlist ${CLUSTER_ID} --partition-cluster-command './scripts/chaos-network.sh partition-cluster' --heal-network-command './scripts/chaos-network.sh heal' --results-dir chaos-results"
+```
+
+The direct result bundle includes per-publish verification, bounded offset
+ranges, read-committed counts per partition, and numeric correctness totals.
+`MB-02` fails if any configured output partition has no committed sample.
+Fault run bundles also contain start/end leader snapshots in the event log.
 
 ## Fault and healing commands
 
@@ -220,6 +245,11 @@ Other checked-in replays:
 
 - `replay-partition-cluster.json` blocks the producer from all brokers.
 - `replay-drop-responses.json` exercises ambiguous response handling.
+
+The current response-drop replay is intentionally classified
+`INVALID_INCOMPLETE`: Toxiproxy cannot prove that a Kafka `EndTxn` request
+arrived and its matching response was dropped. Do not treat historical AF-05
+`PASSED` rows from the earlier oracle as qualified CH-05 evidence.
 
 For adaptive campaigns, omit `--replay` and allow enough experiments for the
 rule-based planner to progress from baseline and broker failures into the
