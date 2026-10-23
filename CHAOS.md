@@ -252,6 +252,46 @@ through an additional policy boundary. The planner does not execute directly:
 cluster identity, health, duration, load, telemetry, duplicate, budget, and
 cleanup checks must accept its typed plan first.
 
+### What each recorded scenario counted
+
+These counts come from the run artifacts in the results table above. A
+“committed transaction” is a ledger outcome whose commit callback completed;
+record totals are independent read-back from Kafka. The differences between
+the two isolation views are meaningful only together with the ledger and
+per-publish verification.
+
+| Scenario | How to read the counts | What the run demonstrates |
+|---|---|---|
+| MB-01 | 32,250 transactions split into 29,029 committed and 3,221 aborted. Each transaction wrote 10 records to each of 2 topics (20 total): 29,029 × 20 = 580,580 committed records; 3,221 × 20 = 64,420 aborted records. | `read_committed` returned 580,580; `read_uncommitted` returned 645,000 = 580,580 + 64,420. The aborted records were visible only to `read_uncommitted`; record-level verification found no missing, duplicate, partial, or cross-topic mismatch. |
+| MB-02 | 8,569 commits × 20 records across 2 topics = 171,380 records per isolation view. | All 24 topic-partitions (12 per topic) had samples, and the corrected per-partition/key ordering check found 0 violations. |
+| CH-01 | 46,156 commits × 20 records across 2 topics = 923,120 records per isolation view. | The leader-heavy broker (6 preferred leaders versus 3 each) restarted during the run and recovered; verification found no missing or duplicate records. |
+| MB-03 | 15,403 commits × 10 records = 154,030 records per isolation view while a non-leader replica was stopped for 20 seconds. | The non-leader broker restarted and recovered. The observed committed records were fully visible after read-back. |
+| MB-04 | 16,270 commits × 10 records = 162,700 records per isolation view while the target partition leader was stopped for 20 seconds. | A replacement leader served the partition and the stopped broker recovered. The observed committed records were fully visible after read-back. |
+| CH-02 | 11,300 outcomes: 11,299 committed and 1 ambiguous. The read-back contained 112,990 committed-view records and 113,000 uncommitted-view records. | Producer access to one leader broker was blocked for 20 seconds and healed. No acknowledged records were missing and no duplicates were found. The ambiguous outcome is reported separately; it is not counted as a confirmed commit. |
+| CH-03 | 8,180 outcomes: 8,172 committed and 8 ambiguous. The read-back contained 81,720 committed-view records and 81,780 uncommitted-view records. | Producer access to all brokers was blocked for 20 seconds and healed. No acknowledged records were missing and no duplicates were found. Ambiguous outcomes remain distinct from confirmed commits. |
+| CH-04 | 30,516 commits × 10 records = 305,160 records per isolation view over six partition/heal cycles. | All six faults healed. Measured blocked windows were 9.6–11.6 seconds and the five inter-cycle healthy intervals were 20.2–21.6 seconds; correctness checks found no missing, duplicate, partial, or cross-topic mismatch. |
+| CH-05 | 8,132 outcomes: 8,124 committed and 8 ambiguous. The read-back contained 81,240 committed-view records and 81,310 uncommitted-view records. | The TCP response-drop approximation healed, but these counts do **not** prove that a Kafka `EndTxn` request reached the broker and its correlated response was lost. Treat this run as invalid/incomplete evidence for that hypothesis. |
+
+### MB-01 count example: why the isolation totals differ
+
+The recorded MB-01 run wrote 32,250 transactions to two output topics. Each
+transaction contained 10 records in each topic, or 20 records total. Of those
+transactions, 29,029 committed and 3,221 were deliberately aborted to create a
+known isolation test case:
+
+| Outcome | Calculation | Visible in `read_committed` | Visible in `read_uncommitted` |
+|---|---:|---:|---:|
+| Committed | 29,029 × 20 = 580,580 records | 580,580 | 580,580 |
+| Aborted | 3,221 × 20 = 64,420 records | 0 | 64,420 |
+| Total visible |  | **580,580** | **645,000** |
+
+So `read_uncommitted` sees 645,000 records: the 580,580 committed records
+plus 64,420 records from aborted transactions. `read_committed` hides those
+aborted records. This is the expected Kafka behavior, and the deliberate
+aborts make the test stronger than checking committed traffic alone. The
+verifier also matches publish IDs and record indexes; matching only the grand
+totals could hide one missing record balanced by one duplicate.
+
 ## 8. Fault and cleanup commands
 
 ```bash
