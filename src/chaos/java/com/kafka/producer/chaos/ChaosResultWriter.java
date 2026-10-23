@@ -159,6 +159,9 @@ public final class ChaosResultWriter {
                 + "- Result: **" + resultStatus + "**\n"
                 + "- Result detail: " + resultDetail + "\n"
                 + "- Ledger entries: " + report.ledgerEntries() + "\n"
+                + "- Ambiguous outcomes: " + report.rows().stream()
+                        .filter(row -> row.ledgerOutcome().equals(PublishLedger.Outcome.AMBIGUOUS.name()))
+                        .count() + "\n"
                 + "- Observed publish IDs: " + report.observedPublishIds() + "\n"
                 + "- Missing committed publishes: " + report.missingCommitted() + "\n"
                 + "- Visible conclusive failures: " + report.visibleFailed() + "\n"

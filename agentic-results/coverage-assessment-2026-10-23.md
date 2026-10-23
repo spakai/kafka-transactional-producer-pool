@@ -1,8 +1,9 @@
 # Chaos coverage assessment — 2026-10-23
 
-Live runs were executed against the disposable three-broker Kafka 3.7.0 and
-Toxiproxy stack. The IDs below identify run bundles in `chaos-results/` (MB-02
-used `chaos-results-recheck/`). PASS verification rows report zero missing
+Live runs were executed against the disposable three-broker Kafka 3.7.0,
+Toxiproxy, and protocol-aware CH-05 proxy stack. The IDs below identify run
+bundles in `chaos-results/` (MB-02 used `chaos-results-recheck/`). PASS
+verification rows report zero missing
 committed records, duplicates, partial transactions, ordering violations, and
 pending transactions. The two-topic runs also report zero cross-topic
 mismatches. MB-01 checked aborted-record visibility under both isolation
@@ -20,14 +21,18 @@ levels.
 | MB-04 | 60s; target partition leader stopped for 20s | 16,270 committed | 162,700 records under each isolation level; broker restart and recovery confirmed | **PASS** — `MB-04-2026-10-23T06-14-27.406718152Z` |
 | CH-02 | 60s; producer blocked from one leader broker for 20s | 11,300 total: 11,299 committed; 1 ambiguous | 112,990 committed records; 113,000 uncommitted-visible records; no missing acknowledged or duplicate records; network heal confirmed | **PASS** — `CH-02-2026-10-23T06-15-35.404673402Z` |
 | CH-03 | 60s; producer blocked from all brokers for 20s | 8,180 total: 8,172 committed; 8 ambiguous | 81,720 committed records; 81,780 uncommitted-visible records; no missing acknowledged or duplicate records; network heal confirmed | **PASS** — `CH-03-2026-10-23T06-16-43.386937395Z` |
-| CH-05 | 60s TCP response-drop approximation for 20s | 8,132 total: 8,124 committed; 8 ambiguous | 81,240 committed records; 81,310 uncommitted-visible records; network heal confirmed, but no proof of correlated `EndTxn` request/response loss | **INVALID/INCOMPLETE** — `CH-05-2026-10-23T06-17-54.870349108Z` |
+| CH-05 | 70s; 40s protocol-aware response hold; one worker/producer slot | 687 outcomes: 685 committed; 2 ambiguous (`TimeoutException`) | 6,870 records under both isolation levels; 4/4 correlated `EndTxn` responses dropped; broker coordinator query for `chaos-ch-05-bb5065-0` reported `CompleteCommit` at producer epoch 2; zero missing, duplicate, partial, replayed, or pending outcomes | **PASS** — `CH-05-2026-10-23T08-11-43.581397410Z` |
 
 For every run bundle, inspect the matching `-verification.csv` for per-publish
 visibility, `-offsets.csv` for captured bounds, `-partition-counts.csv` for
 partition totals, `-events.jsonl` for fault/recovery events, and `.csv` for
 time-series pool and throughput samples. `chaos-results/summary.md` contains
-numeric run summaries. CH-05 intentionally exits Maven with a nonzero status
-after writing its `INVALID/INCOMPLETE` bundle.
+numeric run summaries. The earlier TCP-only CH-05 run
+(`CH-05-2026-10-23T06-17-54.870349108Z`) remains `INVALID/INCOMPLETE`; the
+protocol-aware run above is the qualified CH-05 result. Later direct CH-05
+diagnostic attempts are also retained in the summary; they either did not
+produce an ambiguous callback or lacked broker transaction-state evidence and
+are not qualified results.
 
 ## Harness defects exposed by live runs
 
@@ -62,10 +67,28 @@ Its earlier `PASSED` label came from an oracle that did not require protocol
 proof or an observed ambiguous result. It is **INVALID/INCOMPLETE CH-05 evidence**,
 not a successful commit-response-loss test.
 
+## CH-05 protocol-aware campaign
+
+The first direct protocol-aware attempt dropped one correlated EndTxn response,
+but the Kafka client reconnected and recovered the commit result, producing no
+ambiguous callback outcome; it was correctly marked `INVALID/INCOMPLETE`. The
+final campaign held EndTxn responses for 40 seconds, exceeding the producer's
+10-second `request.timeout.ms`, with one worker and one pool slot. The proxy
+logged four forwarded requests and four dropped responses with matching
+correlation IDs, parsed the transactional ID from the request, and queried
+Kafka's transaction coordinator during healing. The final ledger contained 2
+ambiguous timeouts and 685 confirmed commits. All 6,870 expected records were
+visible in both isolation views, including all 10 records for each ambiguous
+publish; there were no callback replays, missing records, duplicates, partial
+transactions, or pending transactions. Broker state showed `CompleteCommit`
+for the observed transaction ID at producer epoch 2.
+
 ## Validation and cleanup
 
 - `mvn -Pchaos -Dtest=ClusterInspectorTest,ChaosRunnerTest,ChaosConfigTest,ChaosResultWriterTest test` — 10 tests passed after the verifier fixes.
+- `mvn -Pchaos -Dtest=ChaosRunnerTest,ChaosResultWriterTest test` — 4 tests passed with the CH-05 evidence gate.
+- `python3 -m unittest scripts.test_protocol_kafka_proxy -v` — 7 protocol-frame and socket-proxy tests passed.
+- `docker compose -f docker-compose.chaos.yml config -q` — Compose configuration validated.
 - `mvn -Pchaos,agentic -Dtest=ClusterInspectorTest,ChaosRunnerTest,ChaosConfigTest,ChaosResultWriterTest,PublishLedgerTest,ExperimentOracleTest,CampaignConfigTest,CampaignResultWriterTest,SafetyMonitorTest test` — 19 focused tests passed before the live-run fixes.
 - The earlier full `mvn -Pchaos,agentic test` had 19 Mockito/Byte Buddy self-attach errors in this WSL/JDK environment.
-- After the campaigns, all three brokers and Toxiproxy were healthy, and each proxy reported 0 active toxics.
-- CH-05 still needs a protocol-aware proxy that records `EndTxn` and drops its correlated response, with broker transaction-state evidence, to become a valid commit-response-loss test.
+- After the campaigns, all three brokers, Toxiproxy, and the protocol proxy were healthy; Toxiproxy reported 0 active toxics and the CH-05 protocol proxy was disarmed.

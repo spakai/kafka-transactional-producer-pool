@@ -13,10 +13,12 @@ run and read a campaign, and records the live results available as of
 
 The producer continuously writes small transactions. Each transaction has a
 run ID, a publish ID, and record indexes in its headers. The harness records
-what the producer believes happened, injects a broker or network fault where
-requested, then independently reads the bounded Kafka offset range using both
-consumer isolation settings. It compares the read-back against its publish
-ledger.
+each transaction's outcome—committed, aborted, or ambiguous—in a results file.
+This per-run record of expected outcomes is called the **transaction ledger**;
+it is test-harness bookkeeping, not Kafka's internal transaction log. The
+harness injects a broker or network fault where requested, then independently
+reads the bounded Kafka offset range using both consumer isolation settings.
+It compares those Kafka records with the transaction ledger.
 
 The comparison is the key idea: a successful callback alone does not prove
 that every expected record is present exactly once, and a broker being healthy
@@ -31,10 +33,15 @@ flowchart LR
     B1[Kafka broker 1]
     B2[Kafka broker 2]
     B3[Kafka broker 3]
+    Q[Protocol-aware proxy]
     H -->|produce and consume| P
     P --> B1
     P --> B2
     P --> B3
+    H -->|CH-05 dedicated listeners| Q
+    Q --> B1
+    Q --> B2
+    Q --> B3
     B1 <-->|replication and controller traffic| B2
     B2 <-->|replication and controller traffic| B3
     B1 <-->|replication and controller traffic| B3
@@ -51,7 +58,7 @@ connectivity and pool recovery, not a Kafka inter-broker network partition.
 ```mermaid
 flowchart TD
     A[Check Docker cluster and exact cluster ID] --> B[Capture starting offsets and cluster snapshot]
-    B --> C[Publish transactions and append outcomes to run ledger]
+    B --> C[Publish transactions and record each transaction outcome]
     C --> D{Scenario has a fault?}
     D -->|No| E[Continue workload]
     D -->|Yes| F[Apply one configured broker or network fault]
@@ -60,7 +67,7 @@ flowchart TD
     E --> I[Stop submissions and drain transactions]
     H --> I
     I --> J[Capture ending offsets; read bounded range]
-    J --> K[Compare ledger with read_committed and read_uncommitted]
+    J --> K[Compare transaction outcomes with both isolation views]
     K --> L[Write summary, verification, offsets, events, and samples]
 ```
 
@@ -114,6 +121,39 @@ mvn -Pchaos compile exec:java \
   --results-dir chaos-results"
 ```
 
+CH-05 must use the protocol-aware listener ports so that Kafka metadata routes
+every broker connection through the protocol proxy. `chaos-cluster.sh up`
+starts those listeners and the proxy alongside Toxiproxy. This command arms the
+proxy at 10 seconds, drops broker responses for forwarded `EndTxn` requests
+until it disarms at 50 seconds. The 40-second hold exceeds the producer's
+10-second `request.timeout.ms`. It uses one worker and one pool slot to bound
+the fault workload. The proxy withholds EndTxn responses while armed and keeps
+the connection open, allowing the Kafka client's configured request timeout to
+surface as an ambiguous commit outcome instead of an immediate disconnect and
+transparent retry:
+
+```bash
+mvn -Pchaos compile exec:java \
+  -Dexec.mainClass=com.kafka.producer.chaos.ChaosRunner \
+  -Dexec.args="--scenario CH-05 --bootstrap-servers localhost:19192,localhost:29192,localhost:39192 \
+  --duration-sec 70 --fault-at-sec 10 --fault-duration-sec 40 \
+  --pool-size 1 --threads 1 \
+  --chaos-enabled true --cluster-allowlist ${CLUSTER_ID} \
+  --commit-response-command './scripts/chaos-protocol-proxy.sh arm' \
+  --heal-network-command './scripts/chaos-protocol-proxy.sh heal' \
+  --results-dir chaos-results"
+```
+
+The CH-05 event log records each proxy-forwarded `EndTxn` request, dropped
+response, matching correlation ID, and the broker's transaction-state query
+for the transaction ID parsed from that request. The result is **PASS** only
+if the proxy confirms a matching request/response pair, broker state is
+captured, at least one transaction outcome is ambiguous, and the standard
+record verifier passes. Missing protocol or broker-state proof, or missing
+ambiguity, is
+**INVALID/INCOMPLETE**; correctness violations with those observations are
+**FAIL**.
+
 ## 3. Results from the completed Docker campaigns
 
 These are observed results from the artifacts listed below, not promises about
@@ -134,9 +174,15 @@ records from aborted transactions, so its total is not expected to equal the
 | CH-02 | 60s; producer blocked from one leader broker for 20s | 11,300 outcomes: 11,299 committed, 1 ambiguous; 112,990 read committed and 113,000 read uncommitted | No missing acknowledged records or duplicates; network healing confirmed | `CH-02-2026-10-23T06-15-35.404673402Z` — **PASS** |
 | CH-03 | 60s; producer blocked from all brokers for 20s | 8,180 outcomes: 8,172 committed, 8 ambiguous; 81,720 read committed and 81,780 read uncommitted | No missing acknowledged records or duplicates; network healing confirmed | `CH-03-2026-10-23T06-16-43.386937395Z` — **PASS** |
 | CH-04 | 215s; 2 workers; six blocked/healed cycles | 30,516 committed; 305,160 records under each isolation level | 6/6 faults healed; 0 missing, duplicate, partial, or cross-topic mismatches; blocked windows measured 9.6–11.6s and five healthy intervals 20.2–21.6s | `CH-04-2026-10-23T06-35-12.631653134Z` — **PASS** |
-| CH-05 | 60s; 20s TCP downstream-response-drop approximation | 8,132 outcomes: 8,124 committed, 8 ambiguous; 81,240 read committed and 81,310 read uncommitted | Network healed, but no protocol evidence that an `EndTxn` request reached Kafka and its matching response was dropped | `CH-05-2026-10-23T06-17-54.870349108Z` — **INVALID/INCOMPLETE** |
+| CH-05 | 70s; 40s response hold from second 10; one worker and one pool slot | 687 outcomes: 685 committed, 2 ambiguous (`TimeoutException`); 6,870 records under each isolation level | 4/4 EndTxn responses dropped with matching correlation IDs; broker state query reported `CompleteCommit`; 0 missing, duplicate, replayed, or pending outcomes; each ambiguous publish's 10 records were visible under both isolation levels | `CH-05-2026-10-23T08-11-43.581397410Z` — **PASS** |
 
-The artifact directory contains the run ID in each filename. The detailed
+The earlier TCP-only CH-05 run
+(`CH-05-2026-10-23T06-17-54.870349108Z`) remains **INVALID/INCOMPLETE** and
+is retained as historical evidence. Other direct CH-05 attempts in
+`chaos-results/summary.md` are diagnostic and unqualified; the table's
+08:11:43 run is the only one with the complete protocol, ambiguity, broker
+state, and record-verification evidence. The artifact directory contains the run
+ID in each filename. The detailed
 assessment, including earlier harness defects and the historical AF-05
 interpretation, is in
 [`agentic-results/coverage-assessment-2026-10-23.md`](agentic-results/coverage-assessment-2026-10-23.md).
@@ -181,7 +227,7 @@ does not say how fast the system was operating.
 | Aborted visibility | Known aborted records are hidden in `read_committed` and accounted for in `read_uncommitted` | Tests both Kafka isolation views with a known set of intentional aborts | Requires the intentional abort scenario and complete scan of the captured range |
 | Ordering | Sequence order is checked by topic, partition, and key | Kafka guarantees order within a partition, not globally across partitions/topics | Not a global ordering guarantee; business keys must route consistently |
 | Fault and recovery | Fault application, healing/restart, and recovery are recorded within deadlines | Distinguishes a real injected experiment from a workload that merely ran near a fault command | Docker health and proxy events prove environment state, not every client-level effect |
-| Ambiguous outcomes | Unknown commit outcomes are reported as ambiguous and not counted as acknowledged success | Avoids falsely claiming success or retrying a possibly committed transaction | Ambiguity by itself does not prove a specific protocol response was lost; this is why CH-05 is incomplete |
+| Ambiguous outcomes | Unknown commit outcomes are reported as ambiguous and not counted as acknowledged success | Avoids falsely claiming success or retrying a possibly committed transaction | Ambiguity alone does not prove a response was lost; CH-05 also requires the proxy's matching `EndTxn` request/response evidence |
 | Cleanup | No active toxics; brokers healthy; full ISR restored before next run | Ensures one campaign does not contaminate the next | Verify this explicitly after interruption or timeout |
 
 ### Why the measurements are reasonably trustworthy
@@ -196,11 +242,14 @@ exceptions.
 
 Trust is bounded: these are finite runs on one local Docker topology, under
 the recorded workload and timing. They do not prove behavior for every broker
-version, production load, or untested configuration. In particular, CH-05 is
-not valid protocol-level commit-response-loss evidence. `drop-responses`
-suppresses downstream Kafka traffic broadly; it does not identify an `EndTxn`
-frame or prove its corresponding response was lost. A valid CH-05 needs a
-protocol-aware proxy and broker transaction-state corroboration.
+version, production load, or untested configuration. The earlier CH-05 artifact
+is not valid protocol-level commit-response-loss evidence: `drop-responses`
+suppressed downstream Kafka traffic broadly and did not prove that a correlated
+`EndTxn` response was dropped. The current direct CH-05 path uses a
+protocol-aware proxy that records the forwarded request and drops its matching
+response. The new event evidence qualifies the fault injection; it does not
+replace the independent transaction read-back or extend the result beyond this
+specific local run.
 
 ## 6. Inspecting a run
 
@@ -244,13 +293,54 @@ number, say which artifact field and which view it came from.
 | `CH-02` | One-broker network partition | Block producer traffic to one broker | `partition-broker` and `heal` |
 | `CH-03` | Full network partition | Block producer traffic to all brokers | `partition-cluster` and `heal` |
 | `CH-04` | Flapping network | Six cycles of 10s blocked and 20s healthy | `partition-cluster` and `heal` |
-| `CH-05` | Commit-response loss | Intended protocol-level response ambiguity; current hook is only an approximation | `drop-responses` and `heal` |
+| `CH-05` | Commit-response loss | Protocol-aware proxy forwards `EndTxn` requests and drops their correlated responses while armed | `chaos-protocol-proxy.sh arm` and `heal` |
 
 MB means multi-broker baseline/failure coverage; CH means chaos fault scenarios.
 The `AF-*` agentic hypothesis families propose these same fault primitives
 through an additional policy boundary. The planner does not execute directly:
 cluster identity, health, duration, load, telemetry, duplicate, budget, and
 cleanup checks must accept its typed plan first.
+
+### What each recorded scenario counted
+
+These counts come from the run artifacts in the results table above. A
+“committed transaction” is one whose commit callback completed successfully,
+as recorded in the transaction ledger; record totals are independent read-back
+from Kafka. The differences between
+the two isolation views are meaningful only together with the ledger and
+per-publish verification.
+
+| Scenario | How to read the counts | What the run demonstrates |
+|---|---|---|
+| MB-01 | 32,250 transactions split into 29,029 committed and 3,221 aborted. Each transaction wrote 10 records to each of 2 topics (20 total): 29,029 × 20 = 580,580 committed records; 3,221 × 20 = 64,420 aborted records. | `read_committed` returned 580,580; `read_uncommitted` returned 645,000 = 580,580 + 64,420. The aborted records were visible only to `read_uncommitted`; record-level verification found no missing, duplicate, partial, or cross-topic mismatch. |
+| MB-02 | 8,569 commits × 20 records across 2 topics = 171,380 records per isolation view. | All 24 topic-partitions (12 per topic) had samples, and the corrected per-partition/key ordering check found 0 violations. |
+| CH-01 | 46,156 commits × 20 records across 2 topics = 923,120 records per isolation view. | The leader-heavy broker (6 preferred leaders versus 3 each) restarted during the run and recovered; verification found no missing or duplicate records. |
+| MB-03 | 15,403 commits × 10 records = 154,030 records per isolation view while a non-leader replica was stopped for 20 seconds. | The non-leader broker restarted and recovered. The observed committed records were fully visible after read-back. |
+| MB-04 | 16,270 commits × 10 records = 162,700 records per isolation view while the target partition leader was stopped for 20 seconds. | A replacement leader served the partition and the stopped broker recovered. The observed committed records were fully visible after read-back. |
+| CH-02 | 11,300 outcomes: 11,299 committed and 1 ambiguous. The read-back contained 112,990 committed-view records and 113,000 uncommitted-view records. | Producer access to one leader broker was blocked for 20 seconds and healed. No acknowledged records were missing and no duplicates were found. The ambiguous outcome is reported separately; it is not counted as a confirmed commit. |
+| CH-03 | 8,180 outcomes: 8,172 committed and 8 ambiguous. The read-back contained 81,720 committed-view records and 81,780 uncommitted-view records. | Producer access to all brokers was blocked for 20 seconds and healed. No acknowledged records were missing and no duplicates were found. Ambiguous outcomes remain distinct from confirmed commits. |
+| CH-04 | 30,516 commits × 10 records = 305,160 records per isolation view over six partition/heal cycles. | All six faults healed. Measured blocked windows were 9.6–11.6 seconds and the five inter-cycle healthy intervals were 20.2–21.6 seconds; correctness checks found no missing, duplicate, partial, or cross-topic mismatch. |
+| CH-05 | 687 outcomes: 685 committed and 2 ambiguous (`TimeoutException`). Both read-back views contained 6,870 records; all 10 records from each ambiguous publish appeared in both views. | The proxy recorded 4 forwarded `EndTxn` requests and dropped all 4 broker responses with matching correlation IDs. The event log includes the parsed transactional ID and a Kafka coordinator query reporting `CompleteCommit` at producer epoch 2. There were 0 callback replays, missing records, duplicates, partial transactions, or pending transactions. The earlier TCP-only run remains invalid/incomplete. |
+
+### MB-01 count example: why the isolation totals differ
+
+The recorded MB-01 run wrote 32,250 transactions to two output topics. Each
+transaction contained 10 records in each topic, or 20 records total. Of those
+transactions, 29,029 committed and 3,221 were deliberately aborted to create a
+known isolation test case:
+
+| Outcome | Calculation | Visible in `read_committed` | Visible in `read_uncommitted` |
+|---|---:|---:|---:|
+| Committed | 29,029 × 20 = 580,580 records | 580,580 | 580,580 |
+| Aborted | 3,221 × 20 = 64,420 records | 0 | 64,420 |
+| Total visible |  | **580,580** | **645,000** |
+
+So `read_uncommitted` sees 645,000 records: the 580,580 committed records
+plus 64,420 records from aborted transactions. `read_committed` hides those
+aborted records. This is the expected Kafka behavior, and the deliberate
+aborts make the test stronger than checking committed traffic alone. The
+verifier also matches publish IDs and record indexes; matching only the grand
+totals could hide one missing record balanced by one duplicate.
 
 ## 8. Fault and cleanup commands
 
@@ -269,6 +359,9 @@ cleanup checks must accept its typed plan first.
 
 # Show each proxy and its number of active toxics.
 ./scripts/chaos-network.sh status
+
+# Confirm the CH-05 protocol proxy is disarmed and inspect its last proof.
+./scripts/chaos-protocol-proxy.sh status
 ```
 
 After an interrupted run or uncertain cleanup, heal and check the environment
@@ -280,9 +373,10 @@ before continuing:
 ./scripts/chaos-cluster.sh status
 ```
 
-Each proxy should report zero active toxics, every container should be healthy,
-and all topic partitions should have all three brokers in ISR. Stop the
-environment after experiments:
+Each Toxiproxy listener should report zero active toxics, the CH-05 proxy should
+report `"armed": false`, every container should be healthy, and all topic
+partitions should have all three brokers in ISR. Stop the environment after
+experiments:
 
 ```bash
 ./scripts/chaos-network.sh heal

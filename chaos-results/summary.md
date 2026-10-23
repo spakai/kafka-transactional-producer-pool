@@ -349,3 +349,115 @@
 - Verification: `CH-04-2026-10-23T06-35-12.631653134Z-verification.csv`
 - Offset ranges: `CH-04-2026-10-23T06-35-12.631653134Z-offsets.csv`
 - Partition counts: `CH-04-2026-10-23T06-35-12.631653134Z-partition-counts.csv`
+
+## CH-05 — 2026-10-23T08:03:02.606440791Z
+
+- Run ID: `ch-05-59eaadd8-9375-4d93-ab28-e00301ed2fa9`
+- Result: **INVALID/INCOMPLETE**
+- Result detail: Protocol response drop confirmed, but no ambiguous producer outcome was observed
+- Ledger entries: 13186
+- Ambiguous outcomes: 0
+- Observed publish IDs: 13186
+- Missing committed publishes: 0
+- Visible conclusive failures: 0
+- Duplicate publish IDs: 0
+- Partial transactions: 0
+- Ordering violations: 0
+- Aborted transactions: 0
+- Aborted visible to read_committed: 0
+- Aborted records visible to read_uncommitted: 0
+- Aborted read_uncommitted mismatches: 0
+- Missing abort control samples: 0
+- Cross-topic mismatches: 0
+- Ambiguous callback replays: 0
+- Pending transactions after drain: 0
+- Under-sampled MB-02 partitions: 0
+- Samples: `CH-05-2026-10-23T08-03-02.559073191Z.csv`
+- Events: `CH-05-2026-10-23T08-03-02.559073191Z-events.jsonl`
+- Verification: `CH-05-2026-10-23T08-03-02.559073191Z-verification.csv`
+- Offset ranges: `CH-05-2026-10-23T08-03-02.559073191Z-offsets.csv`
+- Partition counts: `CH-05-2026-10-23T08-03-02.559073191Z-partition-counts.csv`
+
+## CH-05 — 2026-10-23T08:06:06.702439170Z
+
+- Run ID: `ch-05-cb7e6c4e-9d1b-41cd-a41c-233475259a61`
+- Result: **INVALID/INCOMPLETE**
+- Result detail: Correlated EndTxn response drop and ambiguous outcomes were observed, but broker transaction-state evidence was not captured
+- Ledger entries: 750
+- Ambiguous outcomes: 2
+- Observed publish IDs: 750
+- Missing committed publishes: 0
+- Visible conclusive failures: 0
+- Duplicate publish IDs: 0
+- Partial transactions: 0
+- Ordering violations: 0
+- Aborted transactions: 0
+- Aborted visible to read_committed: 0
+- Aborted records visible to read_uncommitted: 0
+- Aborted read_uncommitted mismatches: 0
+- Missing abort control samples: 0
+- Cross-topic mismatches: 0
+- Ambiguous callback replays: 0
+- Pending transactions after drain: 0
+- Under-sampled MB-02 partitions: 0
+- Samples: `CH-05-2026-10-23T08-06-06.675449067Z.csv`
+- Events: `CH-05-2026-10-23T08-06-06.675449067Z-events.jsonl`
+- Verification: `CH-05-2026-10-23T08-06-06.675449067Z-verification.csv`
+- Offset ranges: `CH-05-2026-10-23T08-06-06.675449067Z-offsets.csv`
+- Partition counts: `CH-05-2026-10-23T08-06-06.675449067Z-partition-counts.csv`
+
+## CH-05 — 2026-10-23T08:09:26.747046003Z
+
+- Run ID: `ch-05-8f2d750c-695d-49f4-b946-ccbcff4dd142`
+- Result: **INVALID/INCOMPLETE**
+- Result detail: Missing correlated EndTxn response-drop proof or broker transaction state
+- Ledger entries: 720
+- Ambiguous outcomes: 2
+- Observed publish IDs: 719
+- Missing committed publishes: 0
+- Visible conclusive failures: 0
+- Duplicate publish IDs: 0
+- Partial transactions: 0
+- Ordering violations: 0
+- Aborted transactions: 0
+- Aborted visible to read_committed: 0
+- Aborted records visible to read_uncommitted: 0
+- Aborted read_uncommitted mismatches: 0
+- Missing abort control samples: 0
+- Cross-topic mismatches: 0
+- Ambiguous callback replays: 0
+- Pending transactions after drain: 0
+- Under-sampled MB-02 partitions: 0
+- Samples: `CH-05-2026-10-23T08-09-26.726852393Z.csv`
+- Events: `CH-05-2026-10-23T08-09-26.726852393Z-events.jsonl`
+- Verification: `CH-05-2026-10-23T08-09-26.726852393Z-verification.csv`
+- Offset ranges: `CH-05-2026-10-23T08-09-26.726852393Z-offsets.csv`
+- Partition counts: `CH-05-2026-10-23T08-09-26.726852393Z-partition-counts.csv`
+
+## CH-05 — 2026-10-23T08:11:43.600532104Z
+
+- Run ID: `ch-05-bb5065d4-d198-420a-919e-77e75bf81614`
+- Result: **PASS**
+- Result detail: Correlated EndTxn response drop and broker transaction state confirmed; ambiguous outcomes=2
+- Ledger entries: 687
+- Ambiguous outcomes: 2
+- Observed publish IDs: 687
+- Missing committed publishes: 0
+- Visible conclusive failures: 0
+- Duplicate publish IDs: 0
+- Partial transactions: 0
+- Ordering violations: 0
+- Aborted transactions: 0
+- Aborted visible to read_committed: 0
+- Aborted records visible to read_uncommitted: 0
+- Aborted read_uncommitted mismatches: 0
+- Missing abort control samples: 0
+- Cross-topic mismatches: 0
+- Ambiguous callback replays: 0
+- Pending transactions after drain: 0
+- Under-sampled MB-02 partitions: 0
+- Samples: `CH-05-2026-10-23T08-11-43.581397410Z.csv`
+- Events: `CH-05-2026-10-23T08-11-43.581397410Z-events.jsonl`
+- Verification: `CH-05-2026-10-23T08-11-43.581397410Z-verification.csv`
+- Offset ranges: `CH-05-2026-10-23T08-11-43.581397410Z-offsets.csv`
+- Partition counts: `CH-05-2026-10-23T08-11-43.581397410Z-partition-counts.csv`

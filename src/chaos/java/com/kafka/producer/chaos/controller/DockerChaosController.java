@@ -17,6 +17,7 @@ public final class DockerChaosController implements ChaosController {
     private final Consumer<ChaosEvent> events;
     private final Set<Integer> stoppedBrokers = new HashSet<>();
     private boolean networkPartitioned;
+    private boolean commitResponseProofConfirmed;
 
     public DockerChaosController(ChaosConfig config, Consumer<ChaosEvent> events) {
         this.config = config;
@@ -102,10 +103,10 @@ public final class DockerChaosController implements ChaosController {
         }
         events.accept(ChaosEvent.of("commit-response-partition", "requested",
                 "commit response fault hook"));
-        CommandExecutor.runShell(config.commitResponseCommand(), COMMAND_TIMEOUT);
+        String output = CommandExecutor.runShell(config.commitResponseCommand(), COMMAND_TIMEOUT);
         networkPartitioned = true;
         events.accept(ChaosEvent.of("commit-response-partition", "applied",
-                "commit response fault hook"));
+                "commit response fault hook", Map.of("hookOutput", output)));
     }
 
     @Override
@@ -117,9 +118,17 @@ public final class DockerChaosController implements ChaosController {
             throw new IllegalStateException("Network partition active but no heal command configured");
         }
         events.accept(ChaosEvent.of("network-heal", "requested", "all configured rules"));
-        CommandExecutor.runShell(config.healNetworkCommand(), COMMAND_TIMEOUT);
+        String output = CommandExecutor.runShell(config.healNetworkCommand(), COMMAND_TIMEOUT);
         networkPartitioned = false;
-        events.accept(ChaosEvent.of("network-heal", "applied", "all configured rules"));
+        if (config.scenario().equals("CH-05")) {
+            commitResponseProofConfirmed = output.contains("ENDTXN_RESPONSE_DROPPED")
+                    && output.contains("\"broker_state_proof\": true");
+            events.accept(ChaosEvent.of("commit-response-proof",
+                    commitResponseProofConfirmed ? "confirmed" : "missing",
+                    "protocol proxy evidence", Map.of("proxyEvidence", output)));
+        }
+        events.accept(ChaosEvent.of("network-heal", "applied", "all configured rules",
+                Map.of("hookOutput", output)));
     }
 
     @Override
@@ -139,6 +148,10 @@ public final class DockerChaosController implements ChaosController {
             }
         }
         events.accept(ChaosEvent.of("cleanup", "confirmed", "network healed and brokers running"));
+    }
+
+    public synchronized boolean commitResponseProofConfirmed() {
+        return commitResponseProofConfirmed;
     }
 
     @Override
