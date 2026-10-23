@@ -20,18 +20,30 @@ final class CampaignResultWriter {
                 .append("- Seed: `").append(config.seed()).append("`\n")
                 .append("- Cluster: `").append(config.clusterAllowlist()).append("`\n")
                 .append("- Experiments: ").append(results.size()).append("\n\n")
-                .append("| Experiment | Family | Fault | Result | Cleanup |\n")
-                .append("|---|---|---|---|---|\n");
+                .append("| Experiment | Family | Fault | Result | Cleanup | Missing | Failed visible | Duplicates | Partial | Ordering | Aborted visible | Cross-topic | Replayed ambiguous | Under-sampled partitions |\n")
+                .append("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
         for (ExperimentResult result : results) {
             ExperimentPlan p = result.plan();
             Path exp = root.resolve("experiments").resolve(p.experimentId());
             Files.createDirectories(exp);
             ReplayCodec.write(exp.resolve("replay.json"), p);
             writeSamples(exp.resolve("samples.csv"), result.samples());
+            writeVerification(exp.resolve("verification.csv"), result.verification());
+            writeOffsets(exp.resolve("offsets.csv"), result.verification());
+            writePartitionCounts(exp.resolve("partition-counts.csv"), result.verification());
             Files.writeString(exp.resolve("result.json"), resultJson(result), StandardCharsets.UTF_8);
             summary.append('|').append(p.experimentId()).append('|').append(p.hypothesisFamily())
                     .append('|').append(p.faultType()).append('|').append(result.failureClass())
-                    .append('|').append(result.cleanupConfirmed()).append("|\n");
+                    .append('|').append(result.cleanupConfirmed()).append('|')
+                    .append(result.verification().missingCommitted()).append('|')
+                    .append(result.verification().visibleFailed()).append('|')
+                    .append(result.verification().duplicatePublishIds()).append('|')
+                    .append(result.verification().partialTransactions()).append('|')
+                    .append(result.verification().orderingViolations()).append('|')
+                    .append(result.verification().abortedVisibleCommitted()).append('|')
+                    .append(result.verification().crossTopicMismatches()).append('|')
+                    .append(result.verification().callbackReplayViolations()).append('|')
+                    .append(result.verification().underSampledPartitions()).append("|\n");
         }
         Files.writeString(root.resolve("events.jsonl"), eventsJson(events), StandardCharsets.UTF_8);
         Files.writeString(root.resolve("summary.md"), summary, StandardCharsets.UTF_8);
@@ -39,10 +51,10 @@ final class CampaignResultWriter {
     }
 
     private static void writeSamples(Path path, List<ChaosLoadEngine.Sample> samples) throws IOException {
-        StringBuilder csv = new StringBuilder("timestamp,elapsed,attempted,committed,failed,ambiguous,p95_ms,pool_state,ready,leased,total,heap_mb,urp,offline\n");
+        StringBuilder csv = new StringBuilder("timestamp,elapsed,attempted,committed,failed,aborted,ambiguous,p95_ms,pool_state,ready,leased,total,heap_mb,urp,offline\n");
         for (ChaosLoadEngine.Sample s : samples) csv.append(s.timestamp()).append(',').append(s.elapsedSecond())
                 .append(',').append(s.attempted()).append(',').append(s.committed()).append(',').append(s.failed())
-                .append(',').append(s.ambiguous()).append(',').append(s.p95LatencyMs()).append(',').append(s.poolState())
+                .append(',').append(s.aborted()).append(',').append(s.ambiguous()).append(',').append(s.p95LatencyMs()).append(',').append(s.poolState())
                 .append(',').append(s.readyProducers()).append(',').append(s.leasedProducers()).append(',')
                 .append(s.totalProducers()).append(',').append(s.heapUsedMb()).append(',')
                 .append(s.underReplicatedPartitions()).append(',').append(s.offlinePartitions()).append('\n');
@@ -50,9 +62,55 @@ final class CampaignResultWriter {
     }
 
     private static String resultJson(ExperimentResult r) {
+        var v = r.verification();
         return "{\"failureClass\":\"" + r.failureClass() + "\",\"cleanupConfirmed\":"
                 + r.cleanupConfirmed() + ",\"detail\":\"" + escape(r.detail()) + "\",\"writtenAt\":\""
-                + Instant.now() + "\"}\n";
+                + Instant.now() + "\",\"verification\":{\"ledgerEntries\":" + v.ledgerEntries()
+                + ",\"observedPublishIds\":" + v.observedPublishIds()
+                + ",\"observedRecords\":" + v.observedRecords()
+                + ",\"missingCommitted\":" + v.missingCommitted()
+                + ",\"visibleFailed\":" + v.visibleFailed()
+                + ",\"duplicatePublishIds\":" + v.duplicatePublishIds()
+                + ",\"partialTransactions\":" + v.partialTransactions()
+                + ",\"orderingViolations\":" + v.orderingViolations()
+                + ",\"abortedTransactions\":" + v.abortedTransactions()
+                + ",\"abortedVisibleCommitted\":" + v.abortedVisibleCommitted()
+                + ",\"abortedVisibleUncommittedRecords\":" + v.abortedVisibleUncommittedRecords()
+                + ",\"abortedUncommittedMismatches\":" + v.abortedUncommittedMismatches()
+                + ",\"missingAbortControlSamples\":" + v.missingAbortControlSamples()
+                + ",\"crossTopicMismatches\":" + v.crossTopicMismatches()
+                + ",\"callbackReplayViolations\":" + v.callbackReplayViolations()
+                + ",\"pendingTransactions\":" + v.pendingTransactions()
+                + ",\"underSampledPartitions\":" + v.underSampledPartitions()
+                + "}}\n";
+    }
+
+    private static void writeVerification(Path path,
+            com.kafka.producer.chaos.VerificationReport report) throws IOException {
+        StringBuilder out = new StringBuilder("publish_id,ledger_outcome,expected_records,observed_records,observed_uncommitted_records,callback_attempts,error_class\n");
+        for (var row : report.rows()) out.append(csv(row.publishId())).append(',')
+                .append(csv(row.ledgerOutcome())).append(',').append(row.expectedRecords()).append(',')
+                .append(row.observedRecords()).append(',').append(row.observedUncommittedRecords()).append(',')
+                .append(row.callbackAttempts()).append(',')
+                .append(csv(row.errorClass())).append('\n');
+        Files.writeString(path, out, StandardCharsets.UTF_8);
+    }
+
+    private static void writeOffsets(Path path,
+            com.kafka.producer.chaos.VerificationReport report) throws IOException {
+        StringBuilder out = new StringBuilder("topic,partition,start_offset,end_offset\n");
+        for (var e : report.offsetRanges().entrySet()) out.append(csv(e.getKey().topic())).append(',')
+                .append(e.getKey().partition()).append(',').append(e.getValue().startOffset())
+                .append(',').append(e.getValue().endOffset()).append('\n');
+        Files.writeString(path, out, StandardCharsets.UTF_8);
+    }
+
+    private static void writePartitionCounts(Path path,
+            com.kafka.producer.chaos.VerificationReport report) throws IOException {
+        StringBuilder out = new StringBuilder("topic,partition,read_committed_records\n");
+        for (var e : report.committedRecordsByPartition().entrySet()) out.append(csv(e.getKey().topic()))
+                .append(',').append(e.getKey().partition()).append(',').append(e.getValue()).append('\n');
+        Files.writeString(path, out, StandardCharsets.UTF_8);
     }
     private static String eventsJson(List<ChaosEvent> events) {
         StringBuilder out = new StringBuilder();
@@ -62,4 +120,5 @@ final class CampaignResultWriter {
         return out.toString();
     }
     private static String escape(String s) { return s == null ? "" : s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n"); }
+    private static String csv(String s) { return "\"" + (s == null ? "" : s.replace("\"", "\"\"")) + "\""; }
 }

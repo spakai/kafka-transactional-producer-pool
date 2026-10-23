@@ -11,11 +11,14 @@ public final class ChaosConfig {
     private final String scenario;
     private final String bootstrapServers;
     private final String topic;
+    private final java.util.List<String> outputTopics;
     private final int poolSize;
     private final int threads;
     private final int recordsPerTransaction;
     private final int recordSizeBytes;
     private final int targetPartition;
+    private final int partitionCount;
+    private final int abortEvery;
     private final Duration duration;
     private final Duration faultAt;
     private final Duration faultDuration;
@@ -35,11 +38,17 @@ public final class ChaosConfig {
         bootstrapServers = value(values, "bootstrap-servers",
                 "localhost:19092,localhost:29092,localhost:39092");
         topic = value(values, "topic", "chaos-perf-test");
+        outputTopics = java.util.Arrays.stream(value(values, "output-topics", topic).split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).distinct().toList();
         poolSize = positiveInt(values, "pool-size", 8);
         threads = positiveInt(values, "threads", 8);
         recordsPerTransaction = positiveInt(values, "records-per-tx", 10);
         recordSizeBytes = positiveInt(values, "record-size", 1024);
         targetPartition = (int) nonNegativeLong(values, "target-partition", 0);
+        partitionCount = positiveInt(values, "partition-count", 12);
+        long abortEveryValue = nonNegativeLong(values, "abort-every", scenario.equals("MB-01") ? 10 : 0);
+        if (abortEveryValue > Integer.MAX_VALUE) throw new IllegalArgumentException("abort-every is too large");
+        abortEvery = (int) abortEveryValue;
         duration = Duration.ofSeconds(positiveLong(values, "duration-sec", 600));
         faultAt = Duration.ofSeconds(nonNegativeLong(values, "fault-at-sec", 180));
         faultDuration = Duration.ofSeconds(positiveLong(values, "fault-duration-sec", 60));
@@ -82,6 +91,10 @@ public final class ChaosConfig {
     private void validate() {
         if (!scenario.matches("(MB-0[1-4]|CH-0[1-5])")) {
             throw new IllegalArgumentException("Unknown chaos scenario: " + scenario);
+        }
+        if (outputTopics.isEmpty()) throw new IllegalArgumentException("output-topics must not be empty");
+        if (!outputTopics.contains(topic)) {
+            throw new IllegalArgumentException("output-topics must include the primary --topic");
         }
         if (faultAt.compareTo(duration) >= 0 && !scenario.equals("MB-01") && !scenario.equals("MB-02")) {
             throw new IllegalArgumentException("fault-at-sec must be less than duration-sec");
@@ -139,11 +152,14 @@ public final class ChaosConfig {
     public String scenario() { return scenario; }
     public String bootstrapServers() { return bootstrapServers; }
     public String topic() { return topic; }
+    public java.util.List<String> outputTopics() { return outputTopics; }
     public int poolSize() { return poolSize; }
     public int threads() { return threads; }
     public int recordsPerTransaction() { return recordsPerTransaction; }
     public int recordSizeBytes() { return recordSizeBytes; }
     public int targetPartition() { return targetPartition; }
+    public int partitionCount() { return partitionCount; }
+    public int abortEvery() { return abortEvery; }
     public Duration duration() { return duration; }
     public Duration faultAt() { return faultAt; }
     public Duration faultDuration() { return faultDuration; }

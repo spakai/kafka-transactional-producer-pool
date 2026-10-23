@@ -30,16 +30,20 @@ public final class ChaosRunner {
 
         events.accept(ChaosEvent.of("run", "started", runId));
         VerificationReport verification;
+        CorrectnessVerifier verifier = new CorrectnessVerifier(config);
+        java.util.Map<org.apache.kafka.common.TopicPartition, Long> startOffsets;
         try (ClusterInspector inspector =
                      new ClusterInspector(config.bootstrapServers(), Duration.ofSeconds(15));
              DockerChaosController controller = new DockerChaosController(config, events)) {
             ClusterInspector.ClusterSnapshot initial = inspector.inspect(config.topic());
             validateCluster(config, inspector, initial);
+            recordClusterSnapshot(events, "start", initial);
 
             ScenarioContext context =
                     new ScenarioContext(config, controller, inspector, events, initial);
             ChaosScenario scenario = scenario(config.scenario());
             scenario.onStart(context);
+            startOffsets = verifier.captureStartOffsets();
 
             try (ChaosLoadEngine load = new ChaosLoadEngine(config, runId, ledger)) {
                 load.start();
@@ -68,7 +72,10 @@ public final class ChaosRunner {
                 inspector.awaitBrokerCount(config.topic(), 3, config.recoveryTimeout());
                 inspector.awaitFullyReplicated(config.topic(), config.recoveryTimeout());
             }
-            verification = new CorrectnessVerifier(config).verify(runId, ledger);
+            java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets =
+                    verifier.captureEndOffsets();
+            recordClusterSnapshot(events, "end", inspector.inspect(config.topic()));
+            verification = verifier.verify(runId, ledger, startOffsets, endOffsets);
             events.accept(ChaosEvent.of("verification",
                     verification.passed() ? "passed" : "failed",
                     "issues=" + verification.issues().size()));
@@ -78,16 +85,24 @@ public final class ChaosRunner {
         }
 
         events.accept(ChaosEvent.of("run", "completed", runId));
+        String resultStatus = config.scenario().equals("CH-05")
+                ? "INVALID/INCOMPLETE" : verification.passed() ? "PASS" : "FAIL";
+        String resultDetail = config.scenario().equals("CH-05")
+                ? "TCP response drop does not prove a correlated EndTxn request/response loss" : "";
         ChaosResultWriter.ResultFiles files = new ChaosResultWriter()
-                .write(config, runId, samples, events.snapshot(), verification);
+                .write(config, runId, samples, events.snapshot(), verification,
+                        resultStatus, resultDetail);
         System.out.println("Chaos scenario " + config.scenario()
-                + " completed: " + (verification.passed() ? "PASS" : "FAIL"));
+                + " completed: " + resultStatus);
         System.out.println("Samples: " + files.samples());
         System.out.println("Events: " + files.events());
         System.out.println("Verification: " + files.verification());
-        if (!verification.passed()) {
+        System.out.println("Offset ranges: " + files.offsets());
+        System.out.println("Partition counts: " + files.partitionCounts());
+        if (!resultStatus.equals("PASS")) {
             throw new IllegalStateException(
-                    "Correctness verification failed: " + verification.issues());
+                    "Chaos scenario " + resultStatus + ": "
+                            + (verification.issues().isEmpty() ? resultDetail : verification.issues()));
         }
     }
 
@@ -117,6 +132,15 @@ public final class ChaosRunner {
             events.accept(ChaosEvent.of("cluster-snapshot", "unavailable", error.toString()));
             return null;
         }
+    }
+
+    private static void recordClusterSnapshot(EventRecorder events, String phase,
+            ClusterInspector.ClusterSnapshot snapshot) {
+        events.accept(ChaosEvent.of("cluster-snapshot", "recorded", phase,
+                java.util.Map.of("clusterId", snapshot.clusterId(),
+                        "brokers", snapshot.brokerIds(), "leaders", snapshot.leaders(),
+                        "underReplicated", snapshot.underReplicatedPartitions(),
+                        "offline", snapshot.offlinePartitions())));
     }
 
     private static void sleepUntil(long deadlineNanos) throws InterruptedException {

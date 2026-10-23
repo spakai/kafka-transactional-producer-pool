@@ -28,6 +28,18 @@ class ChaosConfigTest {
     }
 
     @Test
+    void parsesMultipleOutputTopicsAndEnablesBaselineAbortSamples() {
+        ChaosConfig config = ChaosConfig.fromArgs(new String[]{
+                "--scenario", "MB-01",
+                "--topic", "audit-a",
+                "--output-topics", "audit-a,audit-b",
+                "--duration-sec", "30"
+        });
+        assertEquals(java.util.List.of("audit-a", "audit-b"), config.outputTopics());
+        assertEquals(10, config.abortEvery());
+    }
+
+    @Test
     void rejectsFaultOutsideDuration() {
         assertThrows(IllegalArgumentException.class, () -> ChaosConfig.fromArgs(new String[]{
                 "--scenario", "CH-01",

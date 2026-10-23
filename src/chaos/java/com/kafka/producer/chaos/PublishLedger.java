@@ -10,6 +10,7 @@ public final class PublishLedger {
     public enum Outcome {
         ATTEMPTED,
         COMMITTED,
+        ABORTED,
         FAILED,
         AMBIGUOUS
     }

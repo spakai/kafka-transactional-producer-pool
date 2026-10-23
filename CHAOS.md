@@ -30,12 +30,20 @@ an outage during sustained transactional load.
 | `CH-04` | Flapping network | Six cycles of 10s blocked and 20s healthy | `partition-cluster` and `heal` |
 | `CH-05` | Commit-response loss | Allows requests and suppresses downstream responses | `drop-responses` and `heal` |
 
+MB-01 and MB-02 are owned by the shared baseline/evidence mission. MB-01 is
+the correctness and steady-state baseline; MB-02 supplies topology and routing
+evidence used by broker-failure scenarios.
+
 ### MB-01: three-broker transactional baseline
 
-Runs transactional load without a fault. It establishes replicated-cluster
-throughput and latency and verifies that acknowledged transactions are visible
-exactly once to a `read_committed` consumer. It should complete with no
-unexpected ambiguous outcomes, producer leaks, or under-replicated partitions.
+Runs transactional load without a fault. “Acknowledged” means the transaction
+callback returned normally after commit completed. Verify each run-scoped
+publish ID and record index against the ledger, exactly once in `read_committed`
+for every output topic. Stop submissions and drain open transactions to a
+deadline; unresolved transactions fail as pending. Do not compare raw
+`read_committed` and `read_uncommitted` counts: aborted records are expected in
+the latter. The current harness checks only its configured topic and
+`read_committed`, so cross-topic and aborted-record claims need verifier work.
 
 ### MB-02: partition leader distribution
 
@@ -43,7 +51,11 @@ Runs without a fault while observing traffic across partitions led by different
 brokers. It is intended to expose partition-specific starvation, skew, or
 ordering problems. The current runner maps `MB-02` to the baseline execution
 path, so leader distribution must be confirmed from the cluster snapshot and
-result samples rather than by a separate fault action.
+result samples rather than by a separate fault action. Treat skew and broker
+throughput differences as observational unless explicit numeric thresholds and
+sample sizes are configured. Require valid leaders/replicas, minimum records
+per partition, and ordering only within a partition or a serialized business
+key consistently routed there; Kafka offers no global or cross-topic order.
 
 ### MB-03: non-leader broker loss
 
@@ -62,12 +74,12 @@ restart, no stuck leases, and no partially visible transactions.
 
 ### CH-01: broker restart mid-soak
 
-Selects a broker that leads test-topic partitions, stops it during a sustained
-run, restarts it, and observes the post-recovery window. Unlike `MB-04`, broker
-selection is based on cluster-wide leadership rather than only the configured
-target partition. The scenario checks sustained stability, pool recovery,
-throughput restoration, resource reconciliation, and committed-record
-correctness across a complete stop/start cycle.
+Uses a dedicated temporary topic with enough partitions to create leader-count
+imbalance. It selects a broker only when its leader count is strictly greater
+than every other broker; a tie makes the attempt invalid and no fault is
+injected. It then stops/restarts that broker during sustained load and checks
+recovery and correctness. This differs from MB-04 only when the broker leads
+multiple target partitions; a single-partition leader restart duplicates MB-04.
 
 ### CH-02: producer-to-one-broker partition
 
@@ -101,7 +113,12 @@ but the client cannot prove the outcome. Unknown outcomes must be reported as
 ambiguous, the affected producer must not be reused unsafely, and the
 transaction callback must never be automatically replayed. The provided
 Toxiproxy hook suppresses all downstream Kafka traffic, not only protocol-level
-`EndTxn` frames.
+`EndTxn` frames, and cannot prove commit request arrival. Prefer a
+protocol-aware proxy recording `EndTxn` and dropping its correlated response,
+with broker transaction-state evidence as corroboration. An unproven/mistimed
+injection is invalid/incomplete, never a pass. Require a typed ambiguous result,
+one callback invocation, slot quarantine until the configured recovery
+boundary, and no automatic callback replay.
 
 ## Spec 007 hypothesis families
 
@@ -132,7 +149,32 @@ CLUSTER_ID="$(./scripts/chaos-cluster.sh cluster-id)"
 ```
 
 `up` waits for all services, initializes the three proxies, and creates the
-12-partition, replication-factor-3 topic with `min.insync.replicas=2`.
+12-partition, replication-factor-3 publish and audit topics with
+`min.insync.replicas=2`. MB-01 enables one intentional abort sample per ten
+publishes by default; override with `--abort-every 0` to disable it.
+
+For CH-01, prepare a disposable topic with a deterministic preferred-leader
+imbalance. The assignment gives broker 1 six preferred leaders and brokers 2
+and 3 three each:
+
+```bash
+./scripts/chaos-cluster.sh prepare-ch01
+```
+
+Example baseline invocations (use the printed cluster ID and disposable-cluster
+authorization flags for fault scenarios):
+
+```bash
+mvn -Pchaos compile exec:java -Dexec.args="--scenario MB-01 --duration-sec 120 --output-topics chaos-perf-test,chaos-audit-test --results-dir chaos-results"
+mvn -Pchaos compile exec:java -Dexec.args="--scenario MB-02 --duration-sec 120 --partition-count 12 --output-topics chaos-perf-test,chaos-audit-test --results-dir chaos-results"
+mvn -Pchaos compile exec:java -Dexec.args="--scenario CH-01 --topic chaos-ch01-leader-heavy --duration-sec 600 --fault-at-sec 180 --fault-duration-sec 60 --chaos-enabled true --cluster-allowlist ${CLUSTER_ID} --results-dir chaos-results"
+mvn -Pchaos compile exec:java -Dexec.args="--scenario CH-04 --duration-sec 240 --fault-at-sec 20 --chaos-enabled true --cluster-allowlist ${CLUSTER_ID} --partition-cluster-command './scripts/chaos-network.sh partition-cluster' --heal-network-command './scripts/chaos-network.sh heal' --results-dir chaos-results"
+```
+
+The direct result bundle includes per-publish verification, bounded offset
+ranges, read-committed counts per partition, and numeric correctness totals.
+`MB-02` fails if any configured output partition has no committed sample.
+Fault run bundles also contain start/end leader snapshots in the event log.
 
 ## Fault and healing commands
 
@@ -159,7 +201,11 @@ scripts:
 
 `drop-responses` is a transport-level approximation of commit-response loss. It
 suppresses all downstream Kafka traffic during its short fault window; it does
-not parse Kafka protocol frames to target only `EndTxn` responses.
+not parse Kafka protocol frames to target only `EndTxn` responses or prove that
+a commit request reached Kafka. Such a run does not prove the exact CH-05
+condition. Prefer a protocol-aware proxy that records the request and drops its
+correlated response. Classify an unproven/mistimed injection as
+invalid/incomplete, not pass or fail.
 
 If a run is interrupted or cleanup is uncertain, heal first and verify zero
 active toxics:
@@ -199,6 +245,11 @@ Other checked-in replays:
 
 - `replay-partition-cluster.json` blocks the producer from all brokers.
 - `replay-drop-responses.json` exercises ambiguous response handling.
+
+The current response-drop replay is intentionally classified
+`INVALID_INCOMPLETE`: Toxiproxy cannot prove that a Kafka `EndTxn` request
+arrived and its matching response was dropped. Do not treat historical AF-05
+`PASSED` rows from the earlier oracle as qualified CH-05 evidence.
 
 For adaptive campaigns, omit `--replay` and allow enough experiments for the
 rule-based planner to progress from baseline and broker failures into the

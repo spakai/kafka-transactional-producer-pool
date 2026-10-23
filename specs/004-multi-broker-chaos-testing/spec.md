@@ -34,6 +34,15 @@ This specification extends spec 002 with:
 - Verification using `read_committed` and `read_uncommitted` consumers.
 - Structured CSV and Markdown results.
 
+## 2.1 Ownership and evidence boundaries
+
+- A shared baseline/evidence mission owns MB-01 and MB-02. MB-01 establishes correctness and steady-state measurements; MB-02 records topology and per-partition routing evidence consumed by broker-failure scenarios.
+- Baseline ownership does not imply that every measurement is a gate. Each scenario below names its hard invariants; throughput and skew remain diagnostic unless a numeric threshold is stated.
+- “Acknowledged” means the transaction callback returned normally after `commitTransaction` completed. A successful `send()` future alone is not a committed transaction.
+- Every transaction must have a run-scoped unique `publish_id`; every record within it has a stable `record_index`. Producer transactional IDs are diagnostic identifiers, not deduplication keys, because pool slots reuse them.
+- The direct harness accepts `--output-topics` as a comma-separated set. It writes each publish's records to every configured topic inside the same transaction. MB-01 injects one intentional abort per ten publishes by default (`--abort-every 0` disables the control sample).
+- The harness captures per-topic partition high-water offsets before load starts and after workers drain. It scans the same bounded ranges under both isolation levels and reports per-partition committed counts.
+
 ### Out of Scope
 
 - Multi-cluster failover from spec 003.
@@ -161,16 +170,18 @@ Every operation shall return a timestamped result and enough evidence to disting
 **Pass criteria:**
 
 - No unexpected aborted or ambiguous transactions.
-- No lease or producer leaks.
-- All acknowledged publish IDs are visible to the `read_committed` verifier.
-- No publish ID is visible more than once.
+- After submissions stop, every open transaction must resolve within the configured drain deadline. Unresolved transactions fail the run and are reported as pending; they are neither success nor loss.
+- No lease or producer leaks remain after drain.
+- Every acknowledged publish ID and expected record index is visible exactly once to the `read_committed` verifier on every transactional output topic.
+- Every explicitly aborted transaction is absent from `read_committed`. Its presence in `read_uncommitted` is expected and is not a failure.
+- Do not compare raw `read_committed` and `read_uncommitted` counts for equality. Reconcile each isolation view against the publish ledger and captured partition offset range.
 
 ### MB-02: Partition Leader Distribution
 
 **Purpose:** verify publishing across partitions led by different brokers.
 
 - Confirm the test topic has leaders distributed across all three brokers.
-- Publish equal keyed traffic to every partition.
+- Publish round-robin keyed traffic to every partition using `--partition-count`.
 - Run for 5 minutes.
 
 **Capture:**
@@ -181,9 +192,9 @@ Every operation shall return a timestamped result and enough evidence to disting
 
 **Pass criteria:**
 
-- All partitions receive records.
-- No per-key ordering violation occurs.
-- No broker group has unexplained throughput starvation.
+- This is primarily an observational topology/routing baseline. Fail if any expected partition lacks a leader/replica assignment, any partition receives fewer than the configured minimum sample, or a defined per-key ordering invariant is violated.
+- Check order within a topic-partition; check business-key order only when that key is consistently routed to one partition and its expected sequence is defined. Kafka does not provide global or cross-topic ordering.
+- Leader-count skew and throughput differences are reported, not failed, unless a run explicitly configures a sample size and numeric skew/starvation threshold in advance.
 
 ### MB-03: Non-Leader Broker Loss
 
@@ -236,7 +247,8 @@ Every operation shall return a timestamped result and enough evidence to disting
 **Purpose:** validate stability through a full broker stop-and-start cycle during sustained load.
 
 - Start a 10-minute transactional soak.
-- At minute 3, select and stop a broker that leads test-topic partitions.
+- Use a dedicated temporary test topic with enough partitions to produce an imbalance. At minute 3, snapshot leadership and select a broker whose leader count is strictly greater than every other broker's, then stop it.
+- If the distribution is tied or balanced, mark the attempt invalid/ineligible and do not inject a fault. Do not silently substitute a single-partition leader selection.
 - Keep it stopped for 60 seconds.
 - Restart the same broker.
 - Continue the soak until minute 10.
@@ -337,7 +349,9 @@ Every operation shall return a timestamped result and enough evidence to disting
 **Purpose:** verify fail-closed handling when connectivity is lost around commit.
 
 - Use a fault hook or network proxy to interrupt the producer connection after the commit request may have reached Kafka but before the response is observed.
-- Run enough attempts to exercise both committed and non-committed outcomes.
+- Current Toxiproxy downstream-drop behavior suppresses all responses, not only `EndTxn`; it is approximate transport-level ambiguity evidence and does not prove request arrival or response loss for a particular commit.
+- Prefer a protocol-aware proxy that records `EndTxn` and selectively drops its correlated response. Broker transaction-state instrumentation is useful corroborating evidence. A TCP firewall rule alone has the same timing ambiguity as Toxiproxy.
+- A trial is valid only if evidence shows an `EndTxn` request reached Kafka and the corresponding response was dropped. If no qualifying commit overlaps the fault, classify the trial invalid/incomplete, not pass or fail.
 
 **Capture:**
 
@@ -348,10 +362,11 @@ Every operation shall return a timestamped result and enough evidence to disting
 
 **Pass criteria:**
 
-- Every unknown commit is surfaced as an ambiguous failure.
-- The affected producer is quarantined and replaced.
-- The pool never automatically repeats an ambiguous transaction callback.
-- Verification reports the actual broker-visible result without treating it as proof that replay would have been safe.
+- The application returns a typed ambiguous outcome/error; it never reports success based only on timeout.
+- The callback runs once for that publish ID. The affected slot is quarantined from new leases and is not reused until the configured producer recovery/fencing boundary is met.
+- No automatic callback replay occurs. Business reconciliation uses publish ID and observed committed records.
+- Final broker-visible outcome is reconciled independently: committed records appear once and complete, or aborted records are absent from `read_committed`.
+- A mistimed/unproven injection is invalid/incomplete. It cannot count as a pass. Violating any application behavior above is a failure.
 
 ## 9. Correctness Verification
 
@@ -364,17 +379,22 @@ Each record shall contain:
 - Deterministic ordering key.
 - Per-key sequence number.
 - Producer timestamp.
+- Stable record index within its publish/transaction.
 
 After each scenario, the verifier shall:
 
-1. Consume the topic using `isolation.level=read_committed`.
-2. Consume the same range using `isolation.level=read_uncommitted`.
-3. Compare attempted, acknowledged, rejected, and ambiguous publish IDs.
-4. Assert that every acknowledged transaction is fully visible.
-5. Assert that no conclusively aborted transaction is visible to the committed consumer.
-6. Detect duplicate publish IDs.
-7. Detect gaps and inversions in committed per-key sequence numbers.
-8. Report ambiguous IDs separately; do not classify them automatically as lost or duplicated.
+1. Capture start and end offsets for every partition before/after the run; verify only that bounded range, without timestamp-based range inference.
+2. Consume every transactional output topic with `read_committed` and reconcile publish IDs plus record indexes against the ledger.
+3. Use `read_uncommitted` as diagnostic evidence for aborted/open transaction records; never require its total count to equal `read_committed`.
+4. Compare attempted, acknowledged, rejected, aborted, pending, and ambiguous outcomes separately.
+5. Assert every acknowledged transaction is complete on every output topic and every conclusively aborted transaction is absent from `read_committed`.
+6. Detect duplicates by `(run_id, publish_id, record_index)`; report mismatched or partial cross-topic sets.
+7. Check sequence gaps/inversions only for an explicitly defined ordering scope (per partition or serialized business key).
+8. Report ambiguous IDs separately; do not automatically classify them as lost, committed, or safe to replay.
+
+The direct harness persists numeric verification totals, per-publish rows, per-partition committed counts, and start/end offset ranges. Agentic campaign artifacts persist the same numeric totals and verification rows. The current Toxiproxy CH-05 implementation remains explicitly invalid/incomplete because it cannot prove a correlated `EndTxn` request and dropped response; protocol-aware injection is still required before CH-05 can pass.
+
+The earlier AF-05 artifact was produced before the protocol-proof gate existed. Its `PASSED` label is historical and must be interpreted as invalid/incomplete CH-05 evidence under this specification.
 
 The verifier shall retain raw evidence for every failed assertion.
 

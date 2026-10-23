@@ -26,7 +26,7 @@ public final class BrokerFailureScenario implements ChaosScenario {
                             context.config().targetPartition());
         } else {
             brokerId = preferLeader
-                    ? context.inspector().selectLeaderBroker(context.initialCluster())
+                    ? context.inspector().selectStrictlyLeaderHeavyBroker(context.initialCluster())
                     : context.inspector().selectLeastLeadingBroker(context.initialCluster());
         }
         context.event("broker-selected", "confirmed",

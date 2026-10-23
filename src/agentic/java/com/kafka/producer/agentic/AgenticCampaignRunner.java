@@ -93,9 +93,12 @@ public final class AgenticCampaignRunner {
         String safetyAbort = null;
         boolean cleanup = false;
         VerificationReport verification;
+        CorrectnessVerifier verifier = new CorrectnessVerifier(chaos);
+        java.util.Map<TopicPartition, Long> startOffsets;
         try (DockerChaosController controller = new DockerChaosController(chaos, events);
              ExperimentExecutor executor = new ExperimentExecutor(plan, controller, events);
              ChaosLoadEngine load = new ChaosLoadEngine(chaos, runId, ledger)) {
+            startOffsets = verifier.captureStartOffsets();
             load.start();
             long started = System.nanoTime();
             while (elapsed(started).compareTo(plan.totalDuration()) < 0) {
@@ -122,7 +125,7 @@ public final class AgenticCampaignRunner {
         }
         inspector.awaitBrokerCount(campaign.topic(), 3, campaign.recoveryTimeout());
         inspector.awaitFullyReplicated(campaign.topic(), campaign.recoveryTimeout());
-        verification = new CorrectnessVerifier(chaos).verify(runId, ledger);
+        verification = verifier.verify(runId, ledger, startOffsets, verifier.captureEndOffsets());
         return new ExperimentOracle().evaluate(plan, samples, verification, cleanup, safetyAbort);
     }
 
