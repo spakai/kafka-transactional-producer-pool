@@ -67,6 +67,26 @@ public final class ClusterInspector implements AutoCloseable {
                 .getKey();
     }
 
+    /** Selects a strictly leader-heavy broker, rejecting tied or balanced layouts. */
+    public int selectStrictlyLeaderHeavyBroker(ClusterSnapshot snapshot) {
+        Map<Integer, Long> leaderCounts = snapshot.brokerIds().stream()
+                .collect(Collectors.toMap(id -> id, id -> 0L));
+        snapshot.leaders().values().forEach(id -> leaderCounts.computeIfPresent(id,
+                (key, count) -> count + 1));
+        long maximum = leaderCounts.values().stream().mapToLong(Long::longValue).max()
+                .orElseThrow(() -> new IllegalStateException("Cluster has no brokers"));
+        long minimum = leaderCounts.values().stream().mapToLong(Long::longValue).min()
+                .orElseThrow(() -> new IllegalStateException("Cluster has no brokers"));
+        if (maximum == minimum) {
+            throw new IllegalStateException("No strictly leader-heavy broker; leader counts=" + leaderCounts);
+        }
+        return leaderCounts.entrySet().stream()
+                .filter(entry -> entry.getValue() == maximum)
+                .map(Map.Entry::getKey)
+                .min(Integer::compareTo)
+                .orElseThrow();
+    }
+
     public int selectLeastLeadingBroker(ClusterSnapshot snapshot) {
         Map<Integer, Long> leaderCounts = snapshot.brokerIds().stream()
                 .collect(Collectors.toMap(id -> id, id -> 0L));
