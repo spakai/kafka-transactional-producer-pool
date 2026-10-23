@@ -13,10 +13,12 @@ run and read a campaign, and records the live results available as of
 
 The producer continuously writes small transactions. Each transaction has a
 run ID, a publish ID, and record indexes in its headers. The harness records
-what the producer believes happened, injects a broker or network fault where
-requested, then independently reads the bounded Kafka offset range using both
-consumer isolation settings. It compares the read-back against its publish
-ledger.
+each transaction's outcome—committed, aborted, or ambiguous—in a results file.
+This per-run record of expected outcomes is called the **transaction ledger**;
+it is test-harness bookkeeping, not Kafka's internal transaction log. The
+harness injects a broker or network fault where requested, then independently
+reads the bounded Kafka offset range using both consumer isolation settings.
+It compares those Kafka records with the transaction ledger.
 
 The comparison is the key idea: a successful callback alone does not prove
 that every expected record is present exactly once, and a broker being healthy
@@ -51,7 +53,7 @@ connectivity and pool recovery, not a Kafka inter-broker network partition.
 ```mermaid
 flowchart TD
     A[Check Docker cluster and exact cluster ID] --> B[Capture starting offsets and cluster snapshot]
-    B --> C[Publish transactions and append outcomes to run ledger]
+    B --> C[Publish transactions and record each transaction outcome]
     C --> D{Scenario has a fault?}
     D -->|No| E[Continue workload]
     D -->|Yes| F[Apply one configured broker or network fault]
@@ -60,7 +62,7 @@ flowchart TD
     E --> I[Stop submissions and drain transactions]
     H --> I
     I --> J[Capture ending offsets; read bounded range]
-    J --> K[Compare ledger with read_committed and read_uncommitted]
+    J --> K[Compare transaction outcomes with both isolation views]
     K --> L[Write summary, verification, offsets, events, and samples]
 ```
 
@@ -255,8 +257,9 @@ cleanup checks must accept its typed plan first.
 ### What each recorded scenario counted
 
 These counts come from the run artifacts in the results table above. A
-“committed transaction” is a ledger outcome whose commit callback completed;
-record totals are independent read-back from Kafka. The differences between
+“committed transaction” is one whose commit callback completed successfully,
+as recorded in the transaction ledger; record totals are independent read-back
+from Kafka. The differences between
 the two isolation views are meaningful only together with the ledger and
 per-publish verification.
 
