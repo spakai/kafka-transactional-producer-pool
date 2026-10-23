@@ -1,0 +1,13 @@
+topic,partition,start_offset,end_offset
+"chaos-perf-test",8,0,0
+"chaos-perf-test",1,0,0
+"chaos-perf-test",11,0,0
+"chaos-perf-test",4,0,0
+"chaos-perf-test",7,0,36443
+"chaos-perf-test",0,0,18051
+"chaos-perf-test",10,0,18139
+"chaos-perf-test",3,0,18062
+"chaos-perf-test",6,0,18194
+"chaos-perf-test",9,0,0
+"chaos-perf-test",2,0,18007
+"chaos-perf-test",5,0,18150

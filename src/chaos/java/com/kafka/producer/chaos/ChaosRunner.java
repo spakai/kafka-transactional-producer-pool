@@ -30,6 +30,7 @@ public final class ChaosRunner {
 
         events.accept(ChaosEvent.of("run", "started", runId));
         VerificationReport verification;
+        boolean commitResponseProofConfirmed = false;
         CorrectnessVerifier verifier = new CorrectnessVerifier(config);
         java.util.Map<org.apache.kafka.common.TopicPartition, Long> startOffsets;
         try (ClusterInspector inspector =
@@ -75,6 +76,7 @@ public final class ChaosRunner {
                     verifier.captureEndOffsets();
             recordClusterSnapshot(events, "end", inspector.inspect(config.topic()));
             verification = verifier.verify(runId, ledger, startOffsets, endOffsets);
+            commitResponseProofConfirmed = controller.commitResponseProofConfirmed();
             events.accept(ChaosEvent.of("verification",
                     verification.passed() ? "passed" : "failed",
                     "issues=" + verification.issues().size()));
@@ -84,10 +86,13 @@ public final class ChaosRunner {
         }
 
         events.accept(ChaosEvent.of("run", "completed", runId));
-        String resultStatus = config.scenario().equals("CH-05")
-                ? "INVALID/INCOMPLETE" : verification.passed() ? "PASS" : "FAIL";
-        String resultDetail = config.scenario().equals("CH-05")
-                ? "TCP response drop does not prove a correlated EndTxn request/response loss" : "";
+        long ambiguousOutcomes = verification.rows().stream()
+                .filter(row -> row.ledgerOutcome().equals(PublishLedger.Outcome.AMBIGUOUS.name()))
+                .count();
+        String resultStatus = resultStatus(config.scenario(), verification.passed(),
+                commitResponseProofConfirmed, ambiguousOutcomes);
+        String resultDetail = resultDetail(config.scenario(), commitResponseProofConfirmed,
+                ambiguousOutcomes);
         ChaosResultWriter.ResultFiles files = new ChaosResultWriter()
                 .write(config, runId, samples, events.snapshot(), verification,
                         resultStatus, resultDetail);
@@ -161,5 +166,27 @@ public final class ChaosRunner {
             case "CH-04" -> new FlappingNetworkScenario();
             default -> throw new IllegalArgumentException("Unknown scenario: " + scenario);
         };
+    }
+
+    static String resultStatus(String scenario, boolean verificationPassed,
+            boolean commitResponseProofConfirmed, long ambiguousOutcomes) {
+        if (scenario.equals("CH-05")
+                && (!commitResponseProofConfirmed || ambiguousOutcomes == 0)) {
+            return "INVALID/INCOMPLETE";
+        }
+        return verificationPassed ? "PASS" : "FAIL";
+    }
+
+    private static String resultDetail(String scenario, boolean commitResponseProofConfirmed,
+            long ambiguousOutcomes) {
+        if (!scenario.equals("CH-05")) return "";
+        if (!commitResponseProofConfirmed) {
+            return "Missing correlated EndTxn response-drop proof or broker transaction state";
+        }
+        if (ambiguousOutcomes == 0) {
+            return "Protocol response drop confirmed, but no ambiguous producer outcome was observed";
+        }
+        return "Correlated EndTxn response drop and broker transaction state confirmed; ambiguous outcomes="
+                + ambiguousOutcomes;
     }
 }
