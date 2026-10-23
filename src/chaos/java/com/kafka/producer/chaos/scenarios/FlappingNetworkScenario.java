@@ -7,6 +7,7 @@ public final class FlappingNetworkScenario implements ChaosScenario {
     private boolean partitioned;
     private int completedCycles;
     private long nextTransitionSecond;
+    private long nextTransitionNanos;
 
     @Override
     public void onStart(ScenarioContext context) {
@@ -16,18 +17,25 @@ public final class FlappingNetworkScenario implements ChaosScenario {
 
     @Override
     public void onTick(ScenarioContext context, long elapsedSecond) throws Exception {
-        if (elapsedSecond < nextTransitionSecond || completedCycles >= MAX_CYCLES) {
+        if (completedCycles >= MAX_CYCLES) {
             return;
         }
+        long now = System.nanoTime();
         if (!partitioned) {
+            boolean due = completedCycles == 0
+                    ? elapsedSecond >= nextTransitionSecond
+                    : now >= nextTransitionNanos;
+            if (!due) return;
             context.controller().partitionProducerFromCluster();
             partitioned = true;
-            nextTransitionSecond = elapsedSecond + PARTITION_SECONDS;
-        } else {
+            nextTransitionNanos = System.nanoTime()
+                    + java.util.concurrent.TimeUnit.SECONDS.toNanos(PARTITION_SECONDS);
+        } else if (now >= nextTransitionNanos) {
             context.controller().healNetwork();
             partitioned = false;
             completedCycles++;
-            nextTransitionSecond = elapsedSecond + HEALTHY_SECONDS;
+            nextTransitionNanos = System.nanoTime()
+                    + java.util.concurrent.TimeUnit.SECONDS.toNanos(HEALTHY_SECONDS);
         }
     }
 
@@ -37,5 +45,12 @@ public final class FlappingNetworkScenario implements ChaosScenario {
             context.controller().healNetwork();
             partitioned = false;
         }
+    }
+
+    @Override
+    public boolean shouldInspectCluster() {
+        // A metadata request cannot complete while the producer is partitioned,
+        // and its timeout would extend the intended fault window.
+        return !partitioned;
     }
 }

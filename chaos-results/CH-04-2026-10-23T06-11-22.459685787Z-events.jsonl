@@ -1,0 +1,37 @@
+{"timestamp":"2026-10-23T06:07:46.822465715Z","type":"run","outcome":"started","detail":"ch-04-3fa9144f-8580-4560-a409-03aaef39555d","attributes":{}}
+{"timestamp":"2026-10-23T06:07:47.557014988Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"brokers":"[1, 2, 3]","underReplicated":"0","offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-4=1, chaos-perf-test-11=1, chaos-perf-test-1=1, chaos-perf-test-8=1, chaos-perf-test-5=1, chaos-perf-test-2=1, chaos-perf-test-9=1, chaos-perf-test-6=1, chaos-perf-test-3=1, chaos-perf-test-10=1, chaos-perf-test-0=1, chaos-perf-test-7=1}"}}
+{"timestamp":"2026-10-23T06:07:47.557489394Z","type":"network-flapping","outcome":"scheduled","detail":"six 10s/20s cycles","attributes":{}}
+{"timestamp":"2026-10-23T06:07:53.441151172Z","type":"network-partition-cluster","outcome":"requested","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:07:54.561009908Z","type":"network-partition-cluster","outcome":"applied","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:08:09.561448841Z","type":"cluster-snapshot","outcome":"unavailable","detail":"java.util.concurrent.TimeoutException","attributes":{}}
+{"timestamp":"2026-10-23T06:08:10.561717506Z","type":"network-heal","outcome":"requested","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:08:11.343312486Z","type":"network-heal","outcome":"applied","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:08:29.684626314Z","type":"network-partition-cluster","outcome":"requested","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:08:30.924856913Z","type":"network-partition-cluster","outcome":"applied","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:08:45.128893253Z","type":"cluster-snapshot","outcome":"unavailable","detail":"java.util.concurrent.TimeoutException","attributes":{}}
+{"timestamp":"2026-10-23T06:08:46.129238980Z","type":"network-heal","outcome":"requested","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:08:46.722176893Z","type":"network-heal","outcome":"applied","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:09:06.782521713Z","type":"network-partition-cluster","outcome":"requested","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:09:07.863272983Z","type":"network-partition-cluster","outcome":"applied","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:09:22.089626689Z","type":"cluster-snapshot","outcome":"unavailable","detail":"java.util.concurrent.TimeoutException","attributes":{}}
+{"timestamp":"2026-10-23T06:09:23.089931300Z","type":"network-heal","outcome":"requested","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:09:23.654614214Z","type":"network-heal","outcome":"applied","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:09:42.872829349Z","type":"network-partition-cluster","outcome":"requested","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:09:43.926805995Z","type":"network-partition-cluster","outcome":"applied","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:09:58.927529520Z","type":"cluster-snapshot","outcome":"unavailable","detail":"java.util.concurrent.TimeoutException","attributes":{}}
+{"timestamp":"2026-10-23T06:09:59.927891320Z","type":"network-heal","outcome":"requested","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:10:00.512549840Z","type":"network-heal","outcome":"applied","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:10:18.560870622Z","type":"network-partition-cluster","outcome":"requested","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:10:19.601935762Z","type":"network-partition-cluster","outcome":"applied","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:10:34.602398486Z","type":"cluster-snapshot","outcome":"unavailable","detail":"java.util.concurrent.TimeoutException","attributes":{}}
+{"timestamp":"2026-10-23T06:10:35.602784231Z","type":"network-heal","outcome":"requested","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:10:36.124377271Z","type":"network-heal","outcome":"applied","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:10:54.348534515Z","type":"network-partition-cluster","outcome":"requested","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:10:55.572343477Z","type":"network-partition-cluster","outcome":"applied","detail":"all brokers","attributes":{}}
+{"timestamp":"2026-10-23T06:11:09.695292580Z","type":"cluster-snapshot","outcome":"unavailable","detail":"java.util.concurrent.TimeoutException","attributes":{}}
+{"timestamp":"2026-10-23T06:11:10.695713859Z","type":"network-heal","outcome":"requested","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:11:11.221986934Z","type":"network-heal","outcome":"applied","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:11:18.335105Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-23T06:11:18.358055358Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"brokers":"[1, 2, 3]","underReplicated":"0","offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-4=1, chaos-perf-test-11=1, chaos-perf-test-1=1, chaos-perf-test-8=1, chaos-perf-test-5=1, chaos-perf-test-2=1, chaos-perf-test-9=1, chaos-perf-test-6=1, chaos-perf-test-3=1, chaos-perf-test-10=1, chaos-perf-test-0=1, chaos-perf-test-7=1}"}}
+{"timestamp":"2026-10-23T06:11:22.454883273Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-23T06:11:22.456331535Z","type":"run","outcome":"completed","detail":"ch-04-3fa9144f-8580-4560-a409-03aaef39555d","attributes":{}}

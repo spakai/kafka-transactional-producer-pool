@@ -5,6 +5,7 @@ import com.kafka.producer.pool.PoolConfig;
 import com.kafka.producer.pool.TransactionalProducerPool;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.header.internals.RecordHeader;
 
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.Future;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -77,6 +79,10 @@ public final class ChaosLoadEngine implements AutoCloseable {
                 pool.executeInTransaction(lease -> {
                     entry.recordCallbackAttempt();
                     Integer partition = selectedPartition(publishSequence);
+                    boolean intentionalAbort = config.abortEvery() > 0
+                            && (publishSequence + 1) % config.abortEvery() == 0;
+                    List<Future<RecordMetadata>> abortSampleSends = intentionalAbort
+                            ? new ArrayList<>() : List.of();
                     for (String outputTopic : config.outputTopics()) {
                         for (int index = 0; index < config.recordsPerTransaction(); index++) {
                             ProducerRecord<byte[], byte[]> record = partition == null
@@ -89,11 +95,15 @@ public final class ChaosLoadEngine implements AutoCloseable {
                                     String.valueOf(entry.callbackAttempts()));
                             addHeader(record, "publish.sequence", String.valueOf(publishSequence));
                             addHeader(record, "publish.record-index", String.valueOf(index));
-                            lease.send(record);
+                            Future<RecordMetadata> send = lease.send(record);
+                            if (intentionalAbort) abortSampleSends.add(send);
                         }
                     }
-                    if (config.abortEvery() > 0
-                            && (publishSequence + 1) % config.abortEvery() == 0) {
+                    if (intentionalAbort) {
+                        // Ensure the control sample reaches Kafka before aborting. Otherwise
+                        // the producer may purge locally queued records, leaving no aborted
+                        // data records for read_uncommitted verification.
+                        for (Future<RecordMetadata> send : abortSampleSends) send.get();
                         throw new IntentionalAbortException("configured abort sample");
                     }
                     return null;

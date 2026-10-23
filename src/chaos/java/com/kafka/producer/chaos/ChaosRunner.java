@@ -57,11 +57,10 @@ public final class ChaosRunner {
                         break;
                     }
                     scenario.onTick(context, elapsedSecond);
-                    ClusterInspector.ClusterSnapshot cluster = inspectBestEffort(
-                            inspector, config.topic(), events);
+                    ClusterInspector.ClusterSnapshot cluster = scenario.shouldInspectCluster()
+                            ? inspectBestEffort(inspector, config.topic(), events) : null;
                     samples.add(load.sample(elapsedSecond, cluster));
-                    nextSample = Math.max(nextSample + Duration.ofSeconds(1).toNanos(),
-                            System.nanoTime() + Duration.ofSeconds(1).toNanos());
+                    nextSample += Duration.ofSeconds(1).toNanos();
                     sleepUntil(nextSample);
                 }
                 scenario.onFinish(context);

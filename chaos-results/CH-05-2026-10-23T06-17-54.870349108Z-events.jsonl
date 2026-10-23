@@ -1,0 +1,13 @@
+{"timestamp":"2026-10-23T06:16:54.204936903Z","type":"run","outcome":"started","detail":"ch-05-420d98c9-aeb4-4948-8dd5-ee8b822984b6","attributes":{}}
+{"timestamp":"2026-10-23T06:16:54.614872822Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"brokers":"[1, 2, 3]","underReplicated":"0","offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-11=3, chaos-perf-test-1=3, chaos-perf-test-8=2, chaos-perf-test-5=3, chaos-perf-test-2=3, chaos-perf-test-9=3, chaos-perf-test-6=3, chaos-perf-test-3=3, chaos-perf-test-10=2, chaos-perf-test-0=2, chaos-perf-test-7=3, chaos-perf-test-4=2}"}}
+{"timestamp":"2026-10-23T06:16:54.616007301Z","type":"commit-response-fault","outcome":"scheduled","detail":"external hook will interrupt commit responses","attributes":{}}
+{"timestamp":"2026-10-23T06:17:04.683918134Z","type":"commit-response-partition","outcome":"requested","detail":"commit response fault hook","attributes":{}}
+{"timestamp":"2026-10-23T06:17:05.301211094Z","type":"commit-response-partition","outcome":"applied","detail":"commit response fault hook","attributes":{}}
+{"timestamp":"2026-10-23T06:17:20.301902496Z","type":"cluster-snapshot","outcome":"unavailable","detail":"java.util.concurrent.TimeoutException","attributes":{}}
+{"timestamp":"2026-10-23T06:17:35.240636353Z","type":"cluster-snapshot","outcome":"unavailable","detail":"java.util.concurrent.TimeoutException","attributes":{}}
+{"timestamp":"2026-10-23T06:17:36.241212392Z","type":"network-heal","outcome":"requested","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:17:36.859525480Z","type":"network-heal","outcome":"applied","detail":"all configured rules","attributes":{}}
+{"timestamp":"2026-10-23T06:17:53.635800861Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-23T06:17:53.655393778Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"brokers":"[1, 2, 3]","underReplicated":"0","offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-11=3, chaos-perf-test-1=3, chaos-perf-test-8=2, chaos-perf-test-5=3, chaos-perf-test-2=3, chaos-perf-test-9=3, chaos-perf-test-6=3, chaos-perf-test-3=3, chaos-perf-test-10=2, chaos-perf-test-0=2, chaos-perf-test-7=3, chaos-perf-test-4=2}"}}
+{"timestamp":"2026-10-23T06:17:54.866288708Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-23T06:17:54.867464467Z","type":"run","outcome":"completed","detail":"ch-05-420d98c9-aeb4-4948-8dd5-ee8b822984b6","attributes":{}}

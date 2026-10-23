@@ -1,0 +1,12 @@
+{"timestamp":"2026-10-23T06:13:22.810425111Z","type":"run","outcome":"started","detail":"mb-04-87151c90-9778-4526-aff5-2ef89254750a","attributes":{}}
+{"timestamp":"2026-10-23T06:13:23.592546752Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"leaders":"{chaos-perf-test-7=3, chaos-perf-test-0=1, chaos-perf-test-10=1, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=3, chaos-perf-test-5=1, chaos-perf-test-8=1, chaos-perf-test-1=3, chaos-perf-test-11=1, chaos-perf-test-4=1}","clusterId":"5L6g3nShT-eMCtK--X86sw","offline":"0","underReplicated":"0","brokers":"[1, 2, 3]"}}
+{"timestamp":"2026-10-23T06:13:23.594779260Z","type":"broker-selected","outcome":"confirmed","detail":"leader-heavy broker","attributes":{"targetPartition":"0","brokerId":"1"}}
+{"timestamp":"2026-10-23T06:13:34.337363096Z","type":"broker-stop","outcome":"requested","detail":"kafka-pool-chaos-1","attributes":{"brokerId":"1"}}
+{"timestamp":"2026-10-23T06:13:39.712914896Z","type":"broker-stop","outcome":"applied","detail":"kafka-pool-chaos-1","attributes":{"brokerId":"1"}}
+{"timestamp":"2026-10-23T06:13:54.792413936Z","type":"broker-start","outcome":"requested","detail":"kafka-pool-chaos-1","attributes":{"brokerId":"1"}}
+{"timestamp":"2026-10-23T06:13:54.961706494Z","type":"broker-start","outcome":"applied","detail":"kafka-pool-chaos-1","attributes":{"brokerId":"1"}}
+{"timestamp":"2026-10-23T06:14:01.949755748Z","type":"broker-ready","outcome":"confirmed","detail":"kafka-pool-chaos-1","attributes":{"brokerId":"1"}}
+{"timestamp":"2026-10-23T06:14:24.242176745Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-23T06:14:24.276876208Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"leaders":"{chaos-perf-test-7=3, chaos-perf-test-0=2, chaos-perf-test-10=2, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=3, chaos-perf-test-5=3, chaos-perf-test-8=2, chaos-perf-test-1=3, chaos-perf-test-11=3, chaos-perf-test-4=2}","clusterId":"5L6g3nShT-eMCtK--X86sw","offline":"0","underReplicated":"0","brokers":"[1, 2, 3]"}}
+{"timestamp":"2026-10-23T06:14:27.403346366Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-23T06:14:27.404412401Z","type":"run","outcome":"completed","detail":"mb-04-87151c90-9778-4526-aff5-2ef89254750a","attributes":{}}
