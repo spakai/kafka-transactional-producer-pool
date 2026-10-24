@@ -5,6 +5,12 @@ import com.kafka.producer.chaos.scenarios.BrokerFailureScenario;
 import com.kafka.producer.chaos.scenarios.FlappingNetworkScenario;
 import com.kafka.producer.chaos.scenarios.NetworkPartitionScenario;
 import com.kafka.producer.chaos.scenarios.CommitResponsePartitionScenario;
+import com.kafka.producer.chaos.scenarios.CoordinatorFailoverScenario;
+import com.kafka.producer.chaos.scenarios.PoisonDuringCommitScenario;
+import com.kafka.producer.chaos.scenarios.PoolRestartScenario;
+import com.kafka.producer.chaos.scenarios.ProducerPoisonScenario;
+import com.kafka.producer.chaos.scenarios.RebuildFailureScenario;
+import com.kafka.producer.chaos.scenarios.TransactionTimeoutScenario;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,6 +29,26 @@ class ChaosRunnerTest {
         assertInstanceOf(FlappingNetworkScenario.class, ChaosRunner.scenario("CH-04"));
         assertInstanceOf(CommitResponsePartitionScenario.class, ChaosRunner.scenario("CH-05"));
         assertThrows(IllegalArgumentException.class, () -> ChaosRunner.scenario("UNKNOWN"));
+    }
+
+    @Test
+    void dispatchesPoolLifecycleScenarios() {
+        for (String id : new String[] {"CH-06", "CH-07", "CH-08"}) {
+            assertInstanceOf(ProducerPoisonScenario.class, ChaosRunner.scenario(id));
+        }
+        assertInstanceOf(RebuildFailureScenario.class, ChaosRunner.scenario("CH-09"));
+        assertInstanceOf(PoisonDuringCommitScenario.class, ChaosRunner.scenario("CH-10"));
+        for (String id : new String[] {"CH-11", "CH-12", "CH-13"}) {
+            assertInstanceOf(PoolRestartScenario.class, ChaosRunner.scenario(id));
+        }
+        assertInstanceOf(TransactionTimeoutScenario.class, ChaosRunner.scenario("CH-14"));
+        assertInstanceOf(CoordinatorFailoverScenario.class, ChaosRunner.scenario("CH-15"));
+    }
+
+    @Test
+    void ch10RequiresProtocolEvidenceBeforeItCanPass() {
+        assertEquals("INVALID/INCOMPLETE", ChaosRunner.resultStatus("CH-10", true, false, 1));
+        assertEquals("PASS", ChaosRunner.resultStatus("CH-10", true, true, 1));
     }
 
     @Test

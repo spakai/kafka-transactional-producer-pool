@@ -1,0 +1,17 @@
+{"timestamp":"2026-10-24T02:17:40.433442471Z","type":"run","outcome":"started","detail":"ch-08-47af2703-39f3-4c1a-8dee-c09df29b1fbd","attributes":{}}
+{"timestamp":"2026-10-24T02:17:40.854846832Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"offline":"0","underReplicated":"0","brokers":"[1, 2, 3]","leaders":"{chaos-perf-test-5=1, chaos-perf-test-8=1, chaos-perf-test-1=1, chaos-perf-test-11=1, chaos-perf-test-4=2, chaos-perf-test-7=2, chaos-perf-test-0=3, chaos-perf-test-10=2, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=2}","clusterId":"5L6g3nShT-eMCtK--X86sw"}}
+{"timestamp":"2026-10-24T02:17:40.855284778Z","type":"poison-plan","outcome":"scheduled","detail":"REPEATED","attributes":{"poolSize":"2"}}
+{"timestamp":"2026-10-24T02:17:44.215695912Z","type":"producer-fence","outcome":"requested","detail":"chaos-ch-08-47af27-0","attributes":{}}
+{"timestamp":"2026-10-24T02:17:44.331430746Z","type":"producer-fence","outcome":"applied","detail":"chaos-ch-08-47af27-0","attributes":{"transactionalId":"chaos-ch-08-47af27-0"}}
+{"timestamp":"2026-10-24T02:17:45.212559851Z","type":"pool-recovered","outcome":"confirmed","detail":"pool at full capacity","attributes":{"fencedTotal":"1","rebuildSeconds":"1"}}
+{"timestamp":"2026-10-24T02:17:54.212658142Z","type":"producer-fence","outcome":"requested","detail":"chaos-ch-08-47af27-1","attributes":{}}
+{"timestamp":"2026-10-24T02:17:54.326323740Z","type":"producer-fence","outcome":"applied","detail":"chaos-ch-08-47af27-1","attributes":{"transactionalId":"chaos-ch-08-47af27-1"}}
+{"timestamp":"2026-10-24T02:17:55.212639987Z","type":"pool-recovered","outcome":"confirmed","detail":"pool at full capacity","attributes":{"fencedTotal":"2","rebuildSeconds":"1"}}
+{"timestamp":"2026-10-24T02:18:04.212396981Z","type":"producer-fence","outcome":"requested","detail":"chaos-ch-08-47af27-0","attributes":{}}
+{"timestamp":"2026-10-24T02:18:04.345108831Z","type":"producer-fence","outcome":"applied","detail":"chaos-ch-08-47af27-0","attributes":{"transactionalId":"chaos-ch-08-47af27-0"}}
+{"timestamp":"2026-10-24T02:18:05.212277459Z","type":"pool-recovered","outcome":"confirmed","detail":"pool at full capacity","attributes":{"fencedTotal":"3","rebuildSeconds":"1"}}
+{"timestamp":"2026-10-24T02:18:21.212023956Z","type":"pool-capacity","outcome":"confirmed","detail":"pool at full capacity after fault","attributes":{}}
+{"timestamp":"2026-10-24T02:18:21.312290696Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-24T02:18:21.332088407Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"offline":"0","underReplicated":"0","brokers":"[1, 2, 3]","leaders":"{chaos-perf-test-5=1, chaos-perf-test-8=1, chaos-perf-test-1=1, chaos-perf-test-11=1, chaos-perf-test-4=2, chaos-perf-test-7=2, chaos-perf-test-0=3, chaos-perf-test-10=2, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=2}","clusterId":"5L6g3nShT-eMCtK--X86sw"}}
+{"timestamp":"2026-10-24T02:18:22.404636352Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-24T02:18:22.405848201Z","type":"run","outcome":"completed","detail":"ch-08-47af2703-39f3-4c1a-8dee-c09df29b1fbd","attributes":{}}

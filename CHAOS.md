@@ -2,7 +2,7 @@
 
 This guide introduces the disposable Kafka chaos environment, explains how to
 run and read a campaign, and records the live results available as of
-2026-10-23. It is written for engineers who are new to chaos testing.
+2026-10-24. It is written for engineers who are new to chaos testing.
 
 > **Safety:** Run these commands only against the local disposable Docker
 > cluster. Fault injection requires both `--chaos-enabled true` and the exact
@@ -154,7 +154,99 @@ ambiguity, is
 **INVALID/INCOMPLETE**; correctness violations with those observations are
 **FAIL**.
 
+CH-10 uses the same protocol listeners. It waits for the configured
+`request.timeout.ms` plus two seconds after arming the proxy, captures broker
+transaction states while they still show the commit outcome, then fences each
+pool transactional ID. Set the fault window longer than the request timeout
+plus two seconds. Example with the default 10-second request timeout:
+
+```bash
+mvn -Pchaos compile exec:java \
+  -Dexec.mainClass=com.kafka.producer.chaos.ChaosRunner \
+  -Dexec.args="--scenario CH-10 --bootstrap-servers localhost:19192,localhost:29192,localhost:39192 \
+  --duration-sec 70 --fault-at-sec 10 --fault-duration-sec 40 \
+  --pool-size 2 --threads 2 \
+  --chaos-enabled true --cluster-allowlist ${CLUSTER_ID} \
+  --commit-response-command './scripts/chaos-protocol-proxy.sh arm' \
+  --capture-commit-response-command './scripts/chaos-protocol-proxy.sh capture' \
+  --heal-network-command './scripts/chaos-protocol-proxy.sh heal' \
+  --results-dir chaos-results"
+```
+
 ## 3. Results from the completed Docker campaigns
+
+### Initial local checkout attempt — 2026-10-24
+
+The initial test attempt used the local
+`feature/ch05-endtxn-response-loss` checkout at
+`c3d4a8b5cb71ab597fd2cd1c588bf53753626393`, before the review branch scenario
+sources and tests were available in the working tree. Results below apply only
+to that initial checkout and do not validate the review-branch-only changes.
+
+Command: `mvn -Pchaos test`
+
+| Check | Result | Details |
+|---|---|---|
+| Chaos unit tests in the available checkout | **PASS** | 14 tests passed across `ChaosResultWriterTest`, `PublishLedgerTest`, `ClusterInspectorTest`, `ChaosRunnerTest`, `ChaosConfigTest`, and `LatencyWindowTest` |
+| Full Maven test suite | **INCOMPLETE** | 56 tests started; 19 errored when Mockito/Byte Buddy could not self-attach to the JVM. The errors are environment instrumentation failures, not reported assertion failures. |
+| Docker chaos campaign | **NOT RUN** | Docker daemon access was denied for `/var/run/docker.sock`; no broker-backed result is claimed. |
+
+This initial attempt is retained to distinguish its results from the
+review-branch Docker campaign below, which was run after fetching the branch
+and gaining Docker access.
+
+### Review branch Docker campaign — 2026-10-24
+
+The review branch was fetched and run from commit
+`e38911d7614613a5cb2c4fbb235e24e322e5f740`. Its chaos Maven suite passed all
+66 tests (0 failures, errors, or skips), including all 7 tests in the new
+`PoolLifecycleScenariosTest`.
+
+The broker-backed scenarios used the disposable Kafka 3.7.0 three-broker
+cluster, runtime cluster ID `5L6g3nShT-eMCtK--X86sw`, pool size 2, 2 workers,
+5 records per transaction, 64-byte records, and the single `chaos-perf-test`
+topic with 12 partitions. Fault runs passed both `--chaos-enabled true` and
+that exact cluster ID as the allowlist. Each result directory contains the
+summary, sample CSV, events, offset range, partition counts, and per-publish
+verification CSV. **PASS** means the runner's scenario evidence checks and
+bounded record verification passed; **INVALID/INCOMPLETE** means the run did
+not meet its required fault evidence.
+
+| Scenario | Run parameters | Result | Ledger entries / ambiguous | Verification and fault evidence | Artifact prefix |
+|---|---|---|---:|---|---|
+| CH-06 | 30s; fault at 3s; pool 2 | **PASS** | 1,645 / 0 | One producer fenced; pool recovery confirmed; no missing, duplicate, partial, or replayed publishes | `CH-06-2026-10-24T02-16-46.678097773Z` |
+| CH-07 | 30s; fault at 3s; pool 2 | **PASS** | 1,226 / 0 | Both pool producers fenced; full-capacity recovery confirmed; no record verification issues | `CH-07-2026-10-24T02-17-29.400900925Z` |
+| CH-08 | 40s; fault window 25s; poison interval 10s; pool 2 | **PASS** | 1,688 / 0 | Three rotating producer fences and three recoveries confirmed; no record verification issues | `CH-08-2026-10-24T02-19-02.736935507Z` |
+| CH-09 | 45s; fault at 3s; client partition 25s; pool 2 | **PASS** | 643 / 2 | Replacement recovery was exercised during the longer partition; network healed; no missing or duplicate acknowledged publishes | `CH-09-2026-10-24T02-20-36.569708886Z` |
+| CH-10 | 70s; fault at 10s; hold 40s; request timeout 10s; protocol listeners; pool 2 | **PASS** | 1,054 / 4 | Four correlated EndTxn responses and pre-fencing `CompleteCommit` state confirmed for both transactional IDs; zero missing, duplicate, partial, or replayed publishes | `chaos-results-ch10-fix-20261024/CH-10-2026-10-24T02-34-14.361441655Z` |
+| CH-11 | 30s; forced in-process pool restart; pool 2 | **PASS** | 1,218 / 0 | One restart completed; full capacity and record verification confirmed | `CH-11-2026-10-24T02-23-06.855083267Z` |
+| CH-12 | 30s; graceful in-process pool restart; pool 2 | **PASS** | 1,776 / 0 | One restart completed; full capacity and record verification confirmed | `CH-12-2026-10-24T02-23-42.446060885Z` |
+| CH-13 | 35s; three rolling restarts 10s apart; pool 2 | **PASS** | 1,691 / 0 | All three restarts completed; full capacity and record verification confirmed | `CH-13-2026-10-24T02-24-22.089623110Z` |
+| CH-14 | 45s; 15s transaction timeout; 20s transaction stall; pool 2 | **PASS** | 1,928 / 0 | Harness reported the timeout fault evidence and full capacity; no missing, duplicate, or partial publishes | `CH-14-2026-10-24T02-26-33.590901498Z` |
+| CH-15 | 35s; configured coordinator stop window 10s; pool 2 | **PASS** | 1,578 / 0 | Broker 1 stopped and restarted (6.7s observed between stop and restart); full-capacity recovery and record verification confirmed | `CH-15-2026-10-24T02-25-32.101152647Z` |
+
+All artifacts are under [`chaos-results-review-20261024/`](chaos-results-review-20261024/);
+[`summary.md`](chaos-results-review-20261024/summary.md) is the index. The
+final cleanup check found all Toxiproxy toxics removed and the CH-05/CH-10
+protocol proxy disarmed. The disposable containers, network, and volumes were
+then stopped and removed.
+
+Additional attempts are retained in the same summary. CH-09's first, shorter
+10-second partition was **INVALID/INCOMPLETE** because the pool never lost
+capacity; the 25-second partition above exercised the intended rebuild failure
+and passed. CH-10's initial run bypassed the protocol proxy; a subsequent
+protocol-aware run still captured state only after fencing and returned
+`Empty`. The corrected run now captures `CompleteCommit` before fencing and
+passes, as shown in
+[`chaos-results-ch10-fix-20261024/summary.md`](chaos-results-ch10-fix-20261024/summary.md).
+After applying the CH-10 correction, `mvn -Pchaos test` passed all 68 tests
+(0 failures, errors, or skips).
+CH-14's 6-second timeout run and a later
+shorter-duration repeat were **INVALID/INCOMPLETE** because they did not
+produce the required fencing evidence; the 45-second run with a 15-second
+transaction timeout did pass. The shorter-repeat variation means CH-14's pass
+should be treated as a successful run with a non-repeatable outcome observed,
+not as a stable result.
 
 These are observed results from the artifacts listed below, not promises about
 future runs or performance guarantees. “Committed” is the number of ledger

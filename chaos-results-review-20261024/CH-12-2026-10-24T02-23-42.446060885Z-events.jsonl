@@ -1,0 +1,10 @@
+{"timestamp":"2026-10-24T02:23:10.088446705Z","type":"run","outcome":"started","detail":"ch-12-6a00826a-8faa-469d-9b29-8f748aeb9283","attributes":{}}
+{"timestamp":"2026-10-24T02:23:10.593731453Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-2=2, chaos-perf-test-9=3, chaos-perf-test-6=3, chaos-perf-test-3=3, chaos-perf-test-10=2, chaos-perf-test-0=3, chaos-perf-test-7=2, chaos-perf-test-4=2, chaos-perf-test-11=1, chaos-perf-test-1=1, chaos-perf-test-8=1, chaos-perf-test-5=1}","brokers":"[1, 2, 3]","underReplicated":"0"}}
+{"timestamp":"2026-10-24T02:23:10.594417819Z","type":"pool-restart","outcome":"scheduled","detail":"restarts=1","attributes":{"shutdownGraceMs":"15000"}}
+{"timestamp":"2026-10-24T02:23:14.024341344Z","type":"pool-restart","outcome":"requested","detail":"restart 1","attributes":{}}
+{"timestamp":"2026-10-24T02:23:14.309101208Z","type":"pool-restart","outcome":"applied","detail":"restart 1","attributes":{"shutdownRejections":"12"}}
+{"timestamp":"2026-10-24T02:23:41.024542925Z","type":"pool-capacity","outcome":"confirmed","detail":"pool at full capacity after fault","attributes":{}}
+{"timestamp":"2026-10-24T02:23:41.178683404Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-24T02:23:41.214530554Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-2=2, chaos-perf-test-9=3, chaos-perf-test-6=3, chaos-perf-test-3=3, chaos-perf-test-10=2, chaos-perf-test-0=3, chaos-perf-test-7=2, chaos-perf-test-4=2, chaos-perf-test-11=1, chaos-perf-test-1=1, chaos-perf-test-8=1, chaos-perf-test-5=1}","brokers":"[1, 2, 3]","underReplicated":"0"}}
+{"timestamp":"2026-10-24T02:23:42.435982678Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-24T02:23:42.438275216Z","type":"run","outcome":"completed","detail":"ch-12-6a00826a-8faa-469d-9b29-8f748aeb9283","attributes":{}}

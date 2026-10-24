@@ -31,7 +31,12 @@ public final class ChaosConfig {
     private final String partitionBrokerCommand;
     private final String partitionClusterCommand;
     private final String commitResponseCommand;
+    private final String captureCommitResponseCommand;
     private final String healNetworkCommand;
+    private final long requestTimeoutMs;
+    private final long transactionTimeoutMs;
+    private final long shutdownGraceMs;
+    private final long poisonIntervalSec;
 
     private ChaosConfig(Map<String, String> values) {
         scenario = value(values, "scenario", "MB-01").toUpperCase();
@@ -60,7 +65,14 @@ public final class ChaosConfig {
         partitionBrokerCommand = value(values, "partition-broker-command", "");
         partitionClusterCommand = value(values, "partition-cluster-command", "");
         commitResponseCommand = value(values, "commit-response-command", "");
+        captureCommitResponseCommand = value(values, "capture-commit-response-command", "");
         healNetworkCommand = value(values, "heal-network-command", "");
+        requestTimeoutMs = positiveLong(values, "request-timeout-ms", 10_000);
+        transactionTimeoutMs = nonNegativeLong(values, "transaction-timeout-ms",
+                scenario.equals("CH-14") ? 6_000 : 0);
+        shutdownGraceMs = positiveLong(values, "shutdown-grace-ms",
+                scenario.equals("CH-11") ? 1 : 15_000);
+        poisonIntervalSec = positiveLong(values, "poison-interval-sec", 10);
 
         Map<Integer, String> containers = new LinkedHashMap<>();
         containers.put(1, value(values, "broker-1-container", "kafka-pool-chaos-1"));
@@ -89,7 +101,7 @@ public final class ChaosConfig {
     }
 
     private void validate() {
-        if (!scenario.matches("(MB-0[1-4]|CH-0[1-5])")) {
+        if (!scenario.matches("(MB-0[1-4]|CH-0[1-9]|CH-1[0-5])")) {
             throw new IllegalArgumentException("Unknown chaos scenario: " + scenario);
         }
         if (outputTopics.isEmpty()) throw new IllegalArgumentException("output-topics must not be empty");
@@ -172,5 +184,11 @@ public final class ChaosConfig {
     public String partitionBrokerCommand() { return partitionBrokerCommand; }
     public String partitionClusterCommand() { return partitionClusterCommand; }
     public String commitResponseCommand() { return commitResponseCommand; }
+    public String captureCommitResponseCommand() { return captureCommitResponseCommand; }
     public String healNetworkCommand() { return healNetworkCommand; }
+    public long requestTimeoutMs() { return requestTimeoutMs; }
+    /** Producer {@code transaction.timeout.ms}; zero keeps the Kafka client default. */
+    public long transactionTimeoutMs() { return transactionTimeoutMs; }
+    public long shutdownGraceMs() { return shutdownGraceMs; }
+    public long poisonIntervalSec() { return poisonIntervalSec; }
 }

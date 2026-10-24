@@ -1,0 +1,11 @@
+{"timestamp":"2026-10-24T02:16:13.648907041Z","type":"run","outcome":"started","detail":"ch-06-0457da49-6503-4c69-a00c-0aef5e6714eb","attributes":{}}
+{"timestamp":"2026-10-24T02:16:14.001983437Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"leaders":"{chaos-perf-test-10=2, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=2, chaos-perf-test-5=1, chaos-perf-test-8=1, chaos-perf-test-1=1, chaos-perf-test-11=1, chaos-perf-test-4=2, chaos-perf-test-7=2, chaos-perf-test-0=3}","clusterId":"5L6g3nShT-eMCtK--X86sw","offline":"0","underReplicated":"0","brokers":"[1, 2, 3]"}}
+{"timestamp":"2026-10-24T02:16:14.002490553Z","type":"poison-plan","outcome":"scheduled","detail":"SINGLE_SLOT","attributes":{"poolSize":"2"}}
+{"timestamp":"2026-10-24T02:16:18.361191380Z","type":"producer-fence","outcome":"requested","detail":"chaos-ch-06-0457da-0","attributes":{}}
+{"timestamp":"2026-10-24T02:16:18.809838539Z","type":"producer-fence","outcome":"applied","detail":"chaos-ch-06-0457da-0","attributes":{"transactionalId":"chaos-ch-06-0457da-0"}}
+{"timestamp":"2026-10-24T02:16:19.358546194Z","type":"pool-recovered","outcome":"confirmed","detail":"pool at full capacity","attributes":{"fencedTotal":"1","rebuildSeconds":"1"}}
+{"timestamp":"2026-10-24T02:16:45.356974737Z","type":"pool-capacity","outcome":"confirmed","detail":"pool at full capacity after fault","attributes":{}}
+{"timestamp":"2026-10-24T02:16:45.438785007Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-24T02:16:45.460837978Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"leaders":"{chaos-perf-test-10=2, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=2, chaos-perf-test-5=1, chaos-perf-test-8=1, chaos-perf-test-1=1, chaos-perf-test-11=1, chaos-perf-test-4=2, chaos-perf-test-7=2, chaos-perf-test-0=3}","clusterId":"5L6g3nShT-eMCtK--X86sw","offline":"0","underReplicated":"0","brokers":"[1, 2, 3]"}}
+{"timestamp":"2026-10-24T02:16:46.674038985Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-24T02:16:46.674947297Z","type":"run","outcome":"completed","detail":"ch-06-0457da49-6503-4c69-a00c-0aef5e6714eb","attributes":{}}

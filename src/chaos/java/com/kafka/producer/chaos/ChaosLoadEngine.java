@@ -23,11 +23,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.LongAdder;
 
-public final class ChaosLoadEngine implements AutoCloseable {
+public final class ChaosLoadEngine implements AutoCloseable, LoadFaults {
     private final ChaosConfig config;
     private final String runId;
     private final PublishLedger ledger;
-    private final TransactionalProducerPool pool;
+    private volatile TransactionalProducerPool pool;
+    private final List<SimpleMeterRegistry> registries = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final java.util.concurrent.atomic.AtomicLong stallMs = new java.util.concurrent.atomic.AtomicLong();
+    private final LongAdder stalls = new LongAdder();
+    private final LongAdder restarts = new LongAdder();
+    private final LongAdder rejections = new LongAdder();
     private final AtomicBoolean stop = new AtomicBoolean();
     private final LongAdder attempted = new LongAdder();
     private final LongAdder committed = new LongAdder();
@@ -43,11 +48,17 @@ public final class ChaosLoadEngine implements AutoCloseable {
         this.config = config;
         this.runId = runId;
         this.ledger = ledger;
-        this.pool = new TransactionalProducerPool(
+        this.pool = newPool();
+        this.executor = Executors.newFixedThreadPool(config.threads());
+    }
+
+    private TransactionalProducerPool newPool() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        registries.add(registry);
+        return new TransactionalProducerPool(
                 poolConfig(config, runId),
                 new com.kafka.producer.pool.DefaultKafkaProducerFactory(),
-                new SimpleMeterRegistry());
-        this.executor = Executors.newFixedThreadPool(config.threads());
+                registry);
     }
 
     public void start() {
@@ -76,7 +87,8 @@ public final class ChaosLoadEngine implements AutoCloseable {
             attempted.increment();
             long startedAt = System.nanoTime();
             try {
-                pool.executeInTransaction(lease -> {
+                TransactionalProducerPool activePool = pool;
+                activePool.executeInTransaction(lease -> {
                     entry.recordCallbackAttempt();
                     Integer partition = selectedPartition(publishSequence);
                     boolean intentionalAbort = config.abortEvery() > 0
@@ -106,6 +118,11 @@ public final class ChaosLoadEngine implements AutoCloseable {
                         for (Future<RecordMetadata> send : abortSampleSends) send.get();
                         throw new IntentionalAbortException("configured abort sample");
                     }
+                    long stall = stallMs.getAndSet(0);
+                    if (stall > 0) {
+                        stalls.increment();
+                        Thread.sleep(stall);
+                    }
                     return null;
                 }, ExecutionOptions.builder()
                         .leaseTimeoutMs(config.leaseTimeoutMs())
@@ -114,6 +131,10 @@ public final class ChaosLoadEngine implements AutoCloseable {
                 entry.complete(PublishLedger.Outcome.COMMITTED, null);
                 committed.increment();
             } catch (RuntimeException error) {
+                if (hasCause(error, com.kafka.producer.pool.PoolShutdownException.class)) {
+                    rejections.increment();
+                    sleepQuietly(50);
+                }
                 if (hasCause(error, IntentionalAbortException.class)) {
                     entry.complete(PublishLedger.Outcome.ABORTED, error);
                     aborted.increment();
@@ -129,6 +150,67 @@ public final class ChaosLoadEngine implements AutoCloseable {
             }
         }
     }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @Override
+    public int poolSize() { return config.poolSize(); }
+
+    @Override
+    public String transactionalId(int slot) {
+        return poolConfig(config, runId).buildTransactionalId(slot);
+    }
+
+    @Override
+    public void stallNextTransaction(java.time.Duration duration) {
+        stallMs.set(duration.toMillis());
+    }
+
+    @Override
+    public long stallsConsumed() { return stalls.sum(); }
+
+    @Override
+    public synchronized void restartPool() {
+        TransactionalProducerPool old = pool;
+        old.shutdown();
+        TransactionalProducerPool replacement = newPool();
+        replacement.initialize();
+        pool = replacement;
+        restarts.increment();
+    }
+
+    @Override
+    public long poolRestarts() { return restarts.sum(); }
+
+    @Override
+    public long shutdownRejections() { return rejections.sum(); }
+
+    @Override
+    public long producerFencedTotal() {
+        double total = 0;
+        for (SimpleMeterRegistry registry : registries) {
+            for (var counter : registry.find("producer_fenced_total").counters()) {
+                total += counter.count();
+            }
+        }
+        return (long) total;
+    }
+
+    @Override
+    public boolean atFullCapacity() {
+        TransactionalProducerPool current = pool;
+        return current.getPoolState() == com.kafka.producer.pool.PoolState.HEALTHY
+                && current.getReadyCount() + current.getLeasedCount() == config.poolSize();
+    }
+
+    @Override
+    public String poolState() { return pool.getPoolState().name(); }
 
     private static void addHeader(
             ProducerRecord<byte[], byte[]> record, String name, String value) {
@@ -210,16 +292,20 @@ public final class ChaosLoadEngine implements AutoCloseable {
         kafka.setProperty("value.serializer",
                 "org.apache.kafka.common.serialization.ByteArraySerializer");
         kafka.setProperty("acks", "all");
-        kafka.setProperty("request.timeout.ms", "10000");
+        kafka.setProperty("request.timeout.ms", String.valueOf(config.requestTimeoutMs()));
         kafka.setProperty("delivery.timeout.ms", "30000");
         kafka.setProperty("max.block.ms", "15000");
+        if (config.transactionTimeoutMs() > 0) {
+            kafka.setProperty("transaction.timeout.ms",
+                    String.valueOf(config.transactionTimeoutMs()));
+        }
 
         return PoolConfig.builder()
                 .poolSize(config.poolSize())
                 .minHealthyProducers(Math.max(1, config.poolSize() / 2))
                 .leaseTimeoutMs(config.leaseTimeoutMs())
                 .leaseHardTimeoutMs(Math.max(30_000, config.leaseTimeoutMs() * 3))
-                .shutdownGracePeriodMs(15_000)
+                .shutdownGracePeriodMs(config.shutdownGraceMs())
                 .retryMaxAttempts(2)
                 .retryBaseDelayMs(100)
                 .retryMaxDelayMs(2_000)

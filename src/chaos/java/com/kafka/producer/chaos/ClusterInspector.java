@@ -116,6 +116,14 @@ public final class ClusterInspector implements AutoCloseable {
                         "No non-leader broker for " + topic + "-" + partition));
     }
 
+    /** Returns the broker currently coordinating the given transactional ID. */
+    public int findTransactionCoordinator(String transactionalId) throws Exception {
+        return admin.describeTransactions(List.of(transactionalId))
+                .description(transactionalId)
+                .get(timeout.toMillis(), TimeUnit.MILLISECONDS)
+                .coordinatorId();
+    }
+
     public void awaitBrokerCount(String topic, int minimumBrokers, Duration wait) throws Exception {
         long deadline = System.nanoTime() + wait.toNanos();
         Exception last = null;

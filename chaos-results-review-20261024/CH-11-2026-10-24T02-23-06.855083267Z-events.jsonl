@@ -1,0 +1,10 @@
+{"timestamp":"2026-10-24T02:22:34.539765354Z","type":"run","outcome":"started","detail":"ch-11-0dd17095-3a87-4570-a5ea-da5b1b820c3b","attributes":{}}
+{"timestamp":"2026-10-24T02:22:35.015136018Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"brokers":"[1, 2, 3]","underReplicated":"0","offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-3=3, chaos-perf-test-10=2, chaos-perf-test-0=3, chaos-perf-test-7=2, chaos-perf-test-4=2, chaos-perf-test-11=1, chaos-perf-test-1=1, chaos-perf-test-8=1, chaos-perf-test-5=1, chaos-perf-test-2=2, chaos-perf-test-9=3, chaos-perf-test-6=3}"}}
+{"timestamp":"2026-10-24T02:22:35.015757102Z","type":"pool-restart","outcome":"scheduled","detail":"restarts=1","attributes":{"shutdownGraceMs":"1"}}
+{"timestamp":"2026-10-24T02:22:38.464113499Z","type":"pool-restart","outcome":"requested","detail":"restart 1","attributes":{}}
+{"timestamp":"2026-10-24T02:22:38.754272518Z","type":"pool-restart","outcome":"applied","detail":"restart 1","attributes":{"shutdownRejections":"12"}}
+{"timestamp":"2026-10-24T02:23:05.463808884Z","type":"pool-capacity","outcome":"confirmed","detail":"pool at full capacity after fault","attributes":{}}
+{"timestamp":"2026-10-24T02:23:05.631036279Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-24T02:23:05.668050840Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"brokers":"[1, 2, 3]","underReplicated":"0","offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-3=3, chaos-perf-test-10=2, chaos-perf-test-0=3, chaos-perf-test-7=2, chaos-perf-test-4=2, chaos-perf-test-11=1, chaos-perf-test-1=1, chaos-perf-test-8=1, chaos-perf-test-5=1, chaos-perf-test-2=2, chaos-perf-test-9=3, chaos-perf-test-6=3}"}}
+{"timestamp":"2026-10-24T02:23:06.845304085Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-24T02:23:06.847402982Z","type":"run","outcome":"completed","detail":"ch-11-0dd17095-3a87-4570-a5ea-da5b1b820c3b","attributes":{}}
