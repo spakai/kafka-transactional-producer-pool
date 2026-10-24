@@ -110,6 +110,46 @@ public final class DockerChaosController implements ChaosController {
     }
 
     @Override
+    public synchronized void captureCommitResponseProof() throws Exception {
+        if (!config.scenario().equals("CH-10")) {
+            throw new IllegalStateException("Early broker proof capture is only used by CH-10");
+        }
+        if (config.captureCommitResponseCommand().isBlank()) {
+            throw new IllegalStateException(
+                    "CH-10 requires --capture-commit-response-command");
+        }
+        String output = CommandExecutor.runShell(
+                config.captureCommitResponseCommand(), COMMAND_TIMEOUT);
+        boolean captured = output.contains("ENDTXN_RESPONSE_DROPPED")
+                && output.contains("\"broker_state_proof\": true");
+        commitResponseProofConfirmed |= captured;
+        events.accept(ChaosEvent.of("commit-response-proof-capture",
+                captured ? "confirmed" : "missing",
+                "proxy and broker state captured before producer fencing",
+                Map.of("proof", output)));
+    }
+
+    @Override
+    public void fenceProducer(String transactionalId) throws Exception {
+        config.requireChaosAuthorization();
+        events.accept(ChaosEvent.of("producer-fence", "requested", transactionalId));
+        java.util.Properties props = new java.util.Properties();
+        props.setProperty("bootstrap.servers", config.bootstrapServers());
+        props.setProperty("key.serializer",
+                "org.apache.kafka.common.serialization.ByteArraySerializer");
+        props.setProperty("value.serializer",
+                "org.apache.kafka.common.serialization.ByteArraySerializer");
+        props.setProperty("transactional.id", transactionalId);
+        props.setProperty("max.block.ms", "15000");
+        try (org.apache.kafka.clients.producer.KafkaProducer<byte[], byte[]> intruder =
+                     new org.apache.kafka.clients.producer.KafkaProducer<>(props)) {
+            intruder.initTransactions();
+        }
+        events.accept(ChaosEvent.of("producer-fence", "applied", transactionalId,
+                Map.of("transactionalId", transactionalId)));
+    }
+
+    @Override
     public synchronized void healNetwork() throws Exception {
         if (!networkPartitioned) {
             return;
@@ -120,12 +160,19 @@ public final class DockerChaosController implements ChaosController {
         events.accept(ChaosEvent.of("network-heal", "requested", "all configured rules"));
         String output = CommandExecutor.runShell(config.healNetworkCommand(), COMMAND_TIMEOUT);
         networkPartitioned = false;
-        if (config.scenario().equals("CH-05")) {
-            commitResponseProofConfirmed = output.contains("ENDTXN_RESPONSE_DROPPED")
+        if (config.scenario().equals("CH-05") || config.scenario().equals("CH-10")) {
+            boolean healedProof = output.contains("ENDTXN_RESPONSE_DROPPED")
                     && output.contains("\"broker_state_proof\": true");
-            events.accept(ChaosEvent.of("commit-response-proof",
-                    commitResponseProofConfirmed ? "confirmed" : "missing",
-                    "protocol proxy evidence", Map.of("proxyEvidence", output)));
+            commitResponseProofConfirmed |= healedProof;
+            if (healedProof || !commitResponseProofConfirmed) {
+                events.accept(ChaosEvent.of("commit-response-proof",
+                        commitResponseProofConfirmed ? "confirmed" : "missing",
+                        "protocol proxy evidence", Map.of("proxyEvidence", output)));
+            } else {
+                events.accept(ChaosEvent.of("commit-response-proof", "retained",
+                        "broker state proof was captured before producer fencing",
+                        Map.of("proxyEvidence", output)));
+            }
         }
         events.accept(ChaosEvent.of("network-heal", "applied", "all configured rules",
                 Map.of("hookOutput", output)));

@@ -1,0 +1,13 @@
+{"timestamp":"2026-10-24T02:16:57.212778318Z","type":"run","outcome":"started","detail":"ch-07-0dcbfc92-afc3-4677-9db5-a102fee67505","attributes":{}}
+{"timestamp":"2026-10-24T02:16:57.596777301Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"leaders":"{chaos-perf-test-7=2, chaos-perf-test-0=3, chaos-perf-test-10=2, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=2, chaos-perf-test-5=1, chaos-perf-test-8=1, chaos-perf-test-1=1, chaos-perf-test-11=1, chaos-perf-test-4=2}","clusterId":"5L6g3nShT-eMCtK--X86sw","offline":"0","underReplicated":"0","brokers":"[1, 2, 3]"}}
+{"timestamp":"2026-10-24T02:16:57.597250471Z","type":"poison-plan","outcome":"scheduled","detail":"ALL_SLOTS","attributes":{"poolSize":"2"}}
+{"timestamp":"2026-10-24T02:17:01.086660797Z","type":"producer-fence","outcome":"requested","detail":"chaos-ch-07-0dcbfc-0","attributes":{}}
+{"timestamp":"2026-10-24T02:17:01.409568047Z","type":"producer-fence","outcome":"applied","detail":"chaos-ch-07-0dcbfc-0","attributes":{"transactionalId":"chaos-ch-07-0dcbfc-0"}}
+{"timestamp":"2026-10-24T02:17:01.409647621Z","type":"producer-fence","outcome":"requested","detail":"chaos-ch-07-0dcbfc-1","attributes":{}}
+{"timestamp":"2026-10-24T02:17:01.627085680Z","type":"producer-fence","outcome":"applied","detail":"chaos-ch-07-0dcbfc-1","attributes":{"transactionalId":"chaos-ch-07-0dcbfc-1"}}
+{"timestamp":"2026-10-24T02:17:01.627249078Z","type":"pool-recovered","outcome":"confirmed","detail":"pool at full capacity","attributes":{"fencedTotal":"1","rebuildSeconds":"0"}}
+{"timestamp":"2026-10-24T02:17:28.083538966Z","type":"pool-capacity","outcome":"confirmed","detail":"pool at full capacity after fault","attributes":{}}
+{"timestamp":"2026-10-24T02:17:28.206888873Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-24T02:17:28.230451384Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"leaders":"{chaos-perf-test-7=2, chaos-perf-test-0=3, chaos-perf-test-10=2, chaos-perf-test-3=3, chaos-perf-test-6=3, chaos-perf-test-9=3, chaos-perf-test-2=2, chaos-perf-test-5=1, chaos-perf-test-8=1, chaos-perf-test-1=1, chaos-perf-test-11=1, chaos-perf-test-4=2}","clusterId":"5L6g3nShT-eMCtK--X86sw","offline":"0","underReplicated":"0","brokers":"[1, 2, 3]"}}
+{"timestamp":"2026-10-24T02:17:29.395903230Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-24T02:17:29.397210241Z","type":"run","outcome":"completed","detail":"ch-07-0dcbfc92-afc3-4677-9db5-a102fee67505","attributes":{}}

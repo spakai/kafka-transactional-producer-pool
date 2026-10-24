@@ -5,6 +5,12 @@ import com.kafka.producer.chaos.scenarios.BaselineScenario;
 import com.kafka.producer.chaos.scenarios.BrokerFailureScenario;
 import com.kafka.producer.chaos.scenarios.ChaosScenario;
 import com.kafka.producer.chaos.scenarios.CommitResponsePartitionScenario;
+import com.kafka.producer.chaos.scenarios.CoordinatorFailoverScenario;
+import com.kafka.producer.chaos.scenarios.PoisonDuringCommitScenario;
+import com.kafka.producer.chaos.scenarios.PoolRestartScenario;
+import com.kafka.producer.chaos.scenarios.ProducerPoisonScenario;
+import com.kafka.producer.chaos.scenarios.RebuildFailureScenario;
+import com.kafka.producer.chaos.scenarios.TransactionTimeoutScenario;
 import com.kafka.producer.chaos.scenarios.FlappingNetworkScenario;
 import com.kafka.producer.chaos.scenarios.NetworkPartitionScenario;
 import com.kafka.producer.chaos.scenarios.ScenarioContext;
@@ -17,7 +23,9 @@ import java.util.UUID;
 
 public final class ChaosRunner {
     private static final Set<String> FAULT_SCENARIOS =
-            Set.of("MB-03", "MB-04", "CH-01", "CH-02", "CH-03", "CH-04", "CH-05");
+            Set.of("MB-03", "MB-04", "CH-01", "CH-02", "CH-03", "CH-04", "CH-05",
+                    "CH-06", "CH-07", "CH-08", "CH-09", "CH-10", "CH-11", "CH-12", "CH-13",
+                    "CH-14", "CH-15");
 
     private ChaosRunner() {}
 
@@ -31,6 +39,7 @@ public final class ChaosRunner {
         events.accept(ChaosEvent.of("run", "started", runId));
         VerificationReport verification;
         boolean commitResponseProofConfirmed = false;
+        String evidenceGap = null;
         CorrectnessVerifier verifier = new CorrectnessVerifier(config);
         java.util.Map<org.apache.kafka.common.TopicPartition, Long> startOffsets;
         try (ClusterInspector inspector =
@@ -47,6 +56,7 @@ public final class ChaosRunner {
             startOffsets = verifier.captureStartOffsets();
 
             try (ChaosLoadEngine load = new ChaosLoadEngine(config, runId, ledger)) {
+                context.attachLoad(load);
                 load.start();
                 long started = System.nanoTime();
                 long durationSeconds = config.duration().toSeconds();
@@ -65,6 +75,8 @@ public final class ChaosRunner {
                     sleepUntil(nextSample);
                 }
                 scenario.onFinish(context);
+                commitResponseProofConfirmed = controller.commitResponseProofConfirmed();
+                evidenceGap = scenario.evidenceGap(context, commitResponseProofConfirmed);
             }
 
             if (FAULT_SCENARIOS.contains(config.scenario())) {
@@ -76,7 +88,6 @@ public final class ChaosRunner {
                     verifier.captureEndOffsets();
             recordClusterSnapshot(events, "end", inspector.inspect(config.topic()));
             verification = verifier.verify(runId, ledger, startOffsets, endOffsets);
-            commitResponseProofConfirmed = controller.commitResponseProofConfirmed();
             events.accept(ChaosEvent.of("verification",
                     verification.passed() ? "passed" : "failed",
                     "issues=" + verification.issues().size()));
@@ -93,6 +104,10 @@ public final class ChaosRunner {
                 commitResponseProofConfirmed, ambiguousOutcomes);
         String resultDetail = resultDetail(config.scenario(), commitResponseProofConfirmed,
                 ambiguousOutcomes);
+        if (resultStatus.equals("PASS") && evidenceGap != null) {
+            resultStatus = "INVALID/INCOMPLETE";
+            resultDetail = evidenceGap;
+        }
         ChaosResultWriter.ResultFiles files = new ChaosResultWriter()
                 .write(config, runId, samples, events.snapshot(), verification,
                         resultStatus, resultDetail);
@@ -164,13 +179,22 @@ public final class ChaosRunner {
             case "CH-03" -> new NetworkPartitionScenario(false);
             case "CH-05" -> new CommitResponsePartitionScenario();
             case "CH-04" -> new FlappingNetworkScenario();
+            case "CH-06" -> new ProducerPoisonScenario(ProducerPoisonScenario.Mode.SINGLE_SLOT);
+            case "CH-07" -> new ProducerPoisonScenario(ProducerPoisonScenario.Mode.ALL_SLOTS);
+            case "CH-08" -> new ProducerPoisonScenario(ProducerPoisonScenario.Mode.REPEATED);
+            case "CH-09" -> new RebuildFailureScenario();
+            case "CH-10" -> new PoisonDuringCommitScenario();
+            case "CH-11", "CH-12" -> PoolRestartScenario.once();
+            case "CH-13" -> PoolRestartScenario.rolling();
+            case "CH-14" -> new TransactionTimeoutScenario();
+            case "CH-15" -> new CoordinatorFailoverScenario();
             default -> throw new IllegalArgumentException("Unknown scenario: " + scenario);
         };
     }
 
     static String resultStatus(String scenario, boolean verificationPassed,
             boolean commitResponseProofConfirmed, long ambiguousOutcomes) {
-        if (scenario.equals("CH-05")
+        if ((scenario.equals("CH-05") || scenario.equals("CH-10"))
                 && (!commitResponseProofConfirmed || ambiguousOutcomes == 0)) {
             return "INVALID/INCOMPLETE";
         }
@@ -179,6 +203,16 @@ public final class ChaosRunner {
 
     private static String resultDetail(String scenario, boolean commitResponseProofConfirmed,
             long ambiguousOutcomes) {
+        if (scenario.equals("CH-10")) {
+            if (!commitResponseProofConfirmed) {
+                return "Missing correlated EndTxn response-drop or pre-fencing broker-state proof";
+            }
+            if (ambiguousOutcomes == 0) {
+                return "Pre-fencing commit-response proof confirmed, but no ambiguous producer outcome was observed";
+            }
+            return "Correlated EndTxn response drops and pre-fencing broker state confirmed; ambiguous outcomes="
+                    + ambiguousOutcomes;
+        }
         if (!scenario.equals("CH-05")) return "";
         if (!commitResponseProofConfirmed) {
             return "Missing correlated EndTxn response-drop proof or broker transaction state";

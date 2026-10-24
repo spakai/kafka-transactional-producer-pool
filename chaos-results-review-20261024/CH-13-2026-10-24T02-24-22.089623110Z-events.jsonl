@@ -1,0 +1,14 @@
+{"timestamp":"2026-10-24T02:23:44.416488497Z","type":"run","outcome":"started","detail":"ch-13-588eb390-4637-4ed8-be01-7456d53350ec","attributes":{}}
+{"timestamp":"2026-10-24T02:23:45.360267741Z","type":"cluster-snapshot","outcome":"recorded","detail":"start","attributes":{"brokers":"[1, 2, 3]","underReplicated":"0","offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-4=2, chaos-perf-test-11=1, chaos-perf-test-1=1, chaos-perf-test-8=1, chaos-perf-test-5=1, chaos-perf-test-2=2, chaos-perf-test-9=3, chaos-perf-test-6=3, chaos-perf-test-3=3, chaos-perf-test-10=2, chaos-perf-test-0=3, chaos-perf-test-7=2}"}}
+{"timestamp":"2026-10-24T02:23:45.361987811Z","type":"pool-restart","outcome":"scheduled","detail":"restarts=3","attributes":{"shutdownGraceMs":"15000"}}
+{"timestamp":"2026-10-24T02:23:48.895679598Z","type":"pool-restart","outcome":"requested","detail":"restart 1","attributes":{}}
+{"timestamp":"2026-10-24T02:23:49.183018455Z","type":"pool-restart","outcome":"applied","detail":"restart 1","attributes":{"shutdownRejections":"12"}}
+{"timestamp":"2026-10-24T02:23:58.894308332Z","type":"pool-restart","outcome":"requested","detail":"restart 2","attributes":{}}
+{"timestamp":"2026-10-24T02:23:59.180066618Z","type":"pool-restart","outcome":"applied","detail":"restart 2","attributes":{"shutdownRejections":"22"}}
+{"timestamp":"2026-10-24T02:24:08.894232260Z","type":"pool-restart","outcome":"requested","detail":"restart 3","attributes":{}}
+{"timestamp":"2026-10-24T02:24:09.169444866Z","type":"pool-restart","outcome":"applied","detail":"restart 3","attributes":{"shutdownRejections":"32"}}
+{"timestamp":"2026-10-24T02:24:20.894783691Z","type":"pool-capacity","outcome":"confirmed","detail":"pool at full capacity after fault","attributes":{}}
+{"timestamp":"2026-10-24T02:24:21.003420253Z","type":"cleanup","outcome":"confirmed","detail":"network healed and brokers running","attributes":{}}
+{"timestamp":"2026-10-24T02:24:21.021896386Z","type":"cluster-snapshot","outcome":"recorded","detail":"end","attributes":{"brokers":"[1, 2, 3]","underReplicated":"0","offline":"0","clusterId":"5L6g3nShT-eMCtK--X86sw","leaders":"{chaos-perf-test-4=2, chaos-perf-test-11=1, chaos-perf-test-1=1, chaos-perf-test-8=1, chaos-perf-test-5=1, chaos-perf-test-2=2, chaos-perf-test-9=3, chaos-perf-test-6=3, chaos-perf-test-3=3, chaos-perf-test-10=2, chaos-perf-test-0=3, chaos-perf-test-7=2}"}}
+{"timestamp":"2026-10-24T02:24:22.085859039Z","type":"verification","outcome":"passed","detail":"issues=0","attributes":{}}
+{"timestamp":"2026-10-24T02:24:22.086793397Z","type":"run","outcome":"completed","detail":"ch-13-588eb390-4637-4ed8-be01-7456d53350ec","attributes":{}}

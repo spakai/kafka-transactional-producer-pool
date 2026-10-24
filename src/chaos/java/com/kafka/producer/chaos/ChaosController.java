@@ -20,6 +20,16 @@ public interface ChaosController extends AutoCloseable {
      */
     void partitionCommitResponse() throws Exception;
 
+    /** Capture the proxy and broker transaction state before CH-10 fences its producers. */
+    void captureCommitResponseProof() throws Exception;
+
+    /**
+     * Poisons a pool producer from outside the pool by running
+     * {@code initTransactions} with the same transactional ID, which bumps the
+     * epoch and fences the pool's instance.
+     */
+    void fenceProducer(String transactionalId) throws Exception;
+
     void healNetwork() throws Exception;
 
     void verifyCleanup() throws Exception;

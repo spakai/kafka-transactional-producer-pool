@@ -70,4 +70,21 @@ class ChaosConfigTest {
                 "--fault-duration-sec", "10"
         }));
     }
+
+    @Test
+    void acceptsPoolLifecycleScenariosWithScenarioDefaults() {
+        ChaosConfig timeout = ChaosConfig.fromArgs(new String[]{
+                "--scenario", "CH-14", "--duration-sec", "120",
+                "--fault-at-sec", "20", "--fault-duration-sec", "10"});
+        assertEquals(6_000, timeout.transactionTimeoutMs());
+        assertEquals(10_000, timeout.requestTimeoutMs());
+        assertEquals(15_000, timeout.shutdownGraceMs());
+        ChaosConfig forced = ChaosConfig.fromArgs(new String[]{
+                "--scenario", "CH-11", "--duration-sec", "120",
+                "--fault-at-sec", "20", "--fault-duration-sec", "10"});
+        assertEquals(1, forced.shutdownGraceMs());
+        assertEquals(0, forced.transactionTimeoutMs());
+        assertThrows(IllegalArgumentException.class, () -> ChaosConfig.fromArgs(
+                new String[]{"--scenario", "CH-16"}));
+    }
 }
