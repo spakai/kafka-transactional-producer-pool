@@ -173,113 +173,89 @@ mvn -Pchaos compile exec:java \
   --results-dir chaos-results"
 ```
 
-## 3. Results from the completed Docker campaigns
+## 3. Scenario catalog and observed results
 
-### Initial local checkout attempt — 2026-10-24
+The catalog below brings the original multi-broker and network scenarios and
+CH-06 through CH-15 together. It describes the fault that was actually run,
+what the verifier observed, and where to inspect the run artifacts. Results are
+from disposable local Docker clusters; they are evidence for these specific
+runs, not guarantees for other Kafka versions or workloads.
 
-The initial test attempt used the local
-`feature/ch05-endtxn-response-loss` checkout at
-`c3d4a8b5cb71ab597fd2cd1c588bf53753626393`, before the review branch scenario
-sources and tests were available in the working tree. Results below apply only
-to that initial checkout and do not validate the review-branch-only changes.
+The Oct 23 campaigns used Kafka 3.7.0 and a three-broker KRaft cluster. MB-01
+through CH-05 used the parameters recorded in `chaos-results/summary.md`; MB-02's
+corrected run is in `chaos-results-recheck/summary.md`. The Oct 24 review-branch
+campaign used the same Kafka version and topology, one 12-partition
+`chaos-perf-test` topic, pool size 2, two workers, five records per transaction,
+and 64-byte records for CH-06 through CH-15. Fault scenarios were enabled only
+for the disposable cluster's exact runtime cluster ID. CH-10 was then rerun
+with pre-fencing broker-state capture; that corrected run is reported separately
+in its own result directory.
 
-Command: `mvn -Pchaos test`
+**PASS** means both the scenario-specific fault evidence and bounded Kafka
+read-back passed. Ambiguous outcomes are counted separately from confirmed
+commits. **INVALID/INCOMPLETE** means the run did not prove the required fault
+was exercised; it is not a correctness pass. A correctness violation after
+valid fault evidence is **FAIL**. The artifact links open the summary index;
+run IDs identify the specific row inside that file and its matching CSV, event,
+offset, partition-count, and verification artifacts.
 
-| Check | Result | Details |
-|---|---|---|
-| Chaos unit tests in the available checkout | **PASS** | 14 tests passed across `ChaosResultWriterTest`, `PublishLedgerTest`, `ClusterInspectorTest`, `ChaosRunnerTest`, `ChaosConfigTest`, and `LatencyWindowTest` |
-| Full Maven test suite | **INCOMPLETE** | 56 tests started; 19 errored when Mockito/Byte Buddy could not self-attach to the JVM. The errors are environment instrumentation failures, not reported assertion failures. |
-| Docker chaos campaign | **NOT RUN** | Docker daemon access was denied for `/var/run/docker.sock`; no broker-backed result is claimed. |
+`MB-*` covers workload baselines, partition distribution, and broker failures.
+`CH-*` covers client network faults and producer/pool lifecycle failures. The
+`AF-*` names in the separate agentic campaign describe planner hypothesis
+families, not additional direct-runner scenario IDs.
 
-This initial attempt is retained to distinguish its results from the
-review-branch Docker campaign below, which was run after fetching the branch
-and gaining Docker access.
+| ID | What was done | What the run showed | Run result and artifacts |
+|---|---|---|---|
+| **MB-01** | 120s transactional baseline across two output topics; 10 records per topic per transaction; deliberately abort every 10th publish to exercise isolation. | 32,250 ledger outcomes: 29,029 committed and 3,221 aborted. `read_committed` contained 580,580 committed records and none of the 64,420 aborted records; `read_uncommitted` contained all 645,000. No missing, duplicate, partial, or cross-topic mismatches. | **PASS**. Run `MB-01-2026-10-23T04-42-06.359142003Z`. [Artifacts](chaos-results/summary.md) |
+| **MB-02** | 30s baseline routing 10 records per transaction across two topics, each with 12 partitions; records distributed round-robin. | 8,569 commits and 171,380 records in each isolation view. All 24 topic-partitions were sampled; zero per-partition/key ordering violations. | **PASS** (corrected run). `MB-02-2026-10-23T04-44-16.741371760Z`. [Artifacts](chaos-results-recheck/summary.md) |
+| **MB-03** | 60s run; stop a non-leader replica for the configured target partition for 20s, restart it, and wait for broker recovery. | 15,403 commits; 154,030 records in each isolation view. Broker recovery completed and read-back found no missing or duplicate records. | **PASS**. `MB-03-2026-10-23T06-13-14.625158912Z`. [Artifacts](chaos-results/summary.md) |
+| **MB-04** | 60s run; stop the target partition's leader for 20s, then restart the broker. | 16,270 commits; 162,700 records in each isolation view. A replacement leader served the partition; the broker recovered and read-back found no missing or duplicate records. | **PASS**. `MB-04-2026-10-23T06-14-27.406718152Z`. [Artifacts](chaos-results/summary.md) |
+| **CH-01** | 180s sustained run after assigning preferred leaders 6/3/3 across brokers; restart the leader-heavy broker (broker 1) during the run. | 46,156 commits; 923,120 records in each isolation view. Restart and healthy recovery confirmed; no missing or duplicate records. | **PASS**. `CH-01-2026-10-23T05-01-21.160003912Z`. [Artifacts](chaos-results/summary.md) |
+| **CH-02** | 60s run; block producer traffic to one broker that leads a partition for 20s, then heal the network. Kafka's internal broker traffic remains connected. | 11,300 outcomes: 11,299 committed and 1 ambiguous. No acknowledged records were missing and no duplicates were found; network healing was confirmed. | **PASS**. `CH-02-2026-10-23T06-15-35.404673402Z`. [Artifacts](chaos-results/summary.md) |
+| **CH-03** | 60s run; block producer traffic to all brokers for 20s, then restore connectivity. The broker cluster itself remains connected. | 8,180 outcomes: 8,172 committed and 8 ambiguous. No acknowledged records were missing and no duplicates were found; network healing was confirmed. | **PASS**. `CH-03-2026-10-23T06-16-43.386937395Z`. [Artifacts](chaos-results/summary.md) |
+| **CH-04** | 215s run with two workers; inject six producer-to-cluster partitions, each followed by a healthy interval. | All 6 faults healed. Blocked intervals measured 9.6–11.6s; the five healthy intervals measured 20.2–21.6s. 30,516 commits / 305,160 records in each isolation view; zero missing, duplicate, partial, or cross-topic mismatches. | **PASS**. `CH-04-2026-10-23T06-35-12.631653134Z`. [Artifacts](chaos-results/summary.md) |
+| **CH-05** | 70s run with one worker and one pool slot; for 40s, a protocol-aware proxy forwards Kafka `EndTxn` requests but drops their correlated responses while keeping connections open. | 687 outcomes: 685 committed and 2 ambiguous timeouts. Proxy evidence showed 4/4 matching responses dropped; coordinator state reported `CompleteCommit`. All 6,870 records were visible in each isolation view, including records from both ambiguous publishes; no replay, missing, duplicate, partial, or pending outcomes. | **PASS** (protocol-qualified run). `CH-05-2026-10-23T08-11-43.581397410Z`. [Artifacts](chaos-results/summary.md) |
+| **CH-06** | 30s run; fence one of two pool producers by initializing an external producer with the same transactional ID. The pool must evict and rebuild that slot. | One producer fence and recovery to full pool capacity. 1,645 ledger outcomes; zero missing, duplicate, partial, ordering, or replay issues. | **PASS**. `CH-06-2026-10-24T02-16-46.678097773Z`. [Artifacts](chaos-results-review-20261024/summary.md) |
+| **CH-07** | 30s run; fence both pool producers during the run; require both slots to be replaced and the pool to return to full capacity. | Both slots were fenced; full-capacity recovery completed. 1,226 ledger outcomes; no record-verification issues. | **PASS**. `CH-07-2026-10-24T02-17-29.400900925Z`. [Artifacts](chaos-results-review-20261024/summary.md) |
+| **CH-08** | 40s run; repeatedly fence rotating producer slots, 10s apart, during a 25s fault window. | Three rotating fences and three recoveries were confirmed. 1,688 ledger outcomes; no record-verification issues. | **PASS**. `CH-08-2026-10-24T02-19-02.736935507Z`. [Artifacts](chaos-results-review-20261024/summary.md) |
+| **CH-09** | 45s run; fence one producer, then one second later partition the client from all brokers for 25s so replacement `initTransactions` must retry; heal and require full capacity. | The pool dropped below full capacity during the partition and recovered after healing. 643 ledger outcomes, 2 ambiguous; no missing, duplicate, partial, or callback-replay issues. | **PASS** (25s partition). `CH-09-2026-10-24T02-20-36.569708886Z`. [Artifacts](chaos-results-review-20261024/summary.md) |
+| **CH-10** | 70s run; drop correlated `EndTxn` responses for 40s with two pool slots. After the 10s request timeout plus 2s grace, capture coordinator state before fencing both pool transactional IDs. | Four matching response drops; both IDs showed pre-fencing `CompleteCommit`. 1,054 ledger outcomes, 4 ambiguous; 1,054 publish IDs observed, zero missing, duplicate, partial, or replayed publishes, and no pending transactions. | **PASS** (corrected pre-fence proof). `CH-10-2026-10-24T02-34-14.361441655Z`. [Corrected run artifacts](chaos-results-ch10-fix-20261024/summary.md) |
+| **CH-11** | 30s run; force one in-process pool restart during load with a 1ms shutdown grace period. The replacement pool reuses the same transactional IDs. | Restart completed; pool returned to full capacity. 1,218 ledger outcomes and no record-verification issues. | **PASS**. `CH-11-2026-10-24T02-23-06.855083267Z`. [Artifacts](chaos-results-review-20261024/summary.md) |
+| **CH-12** | 30s run; gracefully shut down and restart the pool once during load, reusing the same transactional IDs. | Graceful restart completed; pool returned to full capacity. 1,776 ledger outcomes and no record-verification issues. | **PASS**. `CH-12-2026-10-24T02-23-42.446060885Z`. [Artifacts](chaos-results-review-20261024/summary.md) |
+| **CH-13** | 35s run; perform three in-process pool restarts 10s apart during load, like a rolling application restart. | All three restarts completed; pool returned to full capacity. 1,691 ledger outcomes and no record-verification issues. | **PASS**. `CH-13-2026-10-24T02-24-22.089623110Z`. [Artifacts](chaos-results-review-20261024/summary.md) |
+| **CH-14** | 45s run; set `transaction.timeout.ms` to 15s and stall one transaction for 20s after sending records. The coordinator should abort it; the failed commit should fence/evict the producer and trigger rebuild. | Timeout fault evidence and full-capacity recovery were observed. 1,928 ledger outcomes; no missing, duplicate, or partial publishes. The stalled transaction did not leak partial data into committed output. | **PASS** (15s timeout / 20s stall). `CH-14-2026-10-24T02-26-33.590901498Z`. [Artifacts](chaos-results-review-20261024/summary.md) |
+| **CH-15** | 35s run; locate and stop the broker coordinating a pool transactional ID for a configured 10s window; restart it and observe retriable coordinator behavior. | Broker 1 was stopped and restarted (6.7s observed); pool returned to full capacity. 1,578 ledger outcomes and no record-verification issues. | **PASS**. `CH-15-2026-10-24T02-25-32.101152647Z`. [Artifacts](chaos-results-review-20261024/summary.md) |
 
-### Review branch Docker campaign — 2026-10-24
+### Run history and caveats
 
-The review branch was fetched and run from commit
-`e38911d7614613a5cb2c4fbb235e24e322e5f740`. Its chaos Maven suite passed all
-66 tests (0 failures, errors, or skips), including all 7 tests in the new
-`PoolLifecycleScenariosTest`.
+- Before the review-branch sources were brought into the working tree, the
+  initial checkout's `mvn -Pchaos test` run had 14 chaos tests pass. The full
+  56-test Maven run was incomplete: 19 tests errored because Mockito/Byte Buddy
+  could not self-attach to the JVM. Docker access was unavailable during that
+  attempt, so it produced no broker-backed results.
+- The review-branch chaos suite then passed 66 tests, including all 7 tests in
+  `PoolLifecycleScenariosTest`. After the CH-10 correction, `mvn -Pchaos test`
+  passed 68 tests with no failures, errors, or skips.
+- The first CH-09 10s partition was **INVALID/INCOMPLETE**: the pool never lost
+  capacity, so rebuild failure was not exercised. The 25s partition listed
+  above exercised the intended condition and passed.
+- Early CH-10 attempts were not qualified: one bypassed the protocol proxy;
+  another captured state only after fencing and returned `Empty`. The corrected
+  run above captures `CompleteCommit` before fencing and is the qualified result.
+- CH-14's 6s-timeout attempt and a shorter repeat were **INVALID/INCOMPLETE**
+  because they did not produce the required fencing evidence. The table reports
+  the successful 15s-timeout / 20s-stall run; the shorter variation means this
+  result has not been shown to be repeatable.
+- The TCP-only CH-05 attempt is **INVALID/INCOMPLETE** because it did not prove
+  that a correlated `EndTxn` response was dropped. The table reports the later
+  protocol-aware run; diagnostics and earlier attempts remain in
+  [`chaos-results/summary.md`](chaos-results/summary.md).
 
-The broker-backed scenarios used the disposable Kafka 3.7.0 three-broker
-cluster, runtime cluster ID `5L6g3nShT-eMCtK--X86sw`, pool size 2, 2 workers,
-5 records per transaction, 64-byte records, and the single `chaos-perf-test`
-topic with 12 partitions. Fault runs passed both `--chaos-enabled true` and
-that exact cluster ID as the allowlist. Each result directory contains the
-summary, sample CSV, events, offset range, partition counts, and per-publish
-verification CSV. **PASS** means the runner's scenario evidence checks and
-bounded record verification passed; **INVALID/INCOMPLETE** means the run did
-not meet its required fault evidence.
-
-| Scenario | Run parameters | Result | Ledger entries / ambiguous | Verification and fault evidence | Artifact prefix |
-|---|---|---|---:|---|---|
-| CH-06 | 30s; fault at 3s; pool 2 | **PASS** | 1,645 / 0 | One producer fenced; pool recovery confirmed; no missing, duplicate, partial, or replayed publishes | `CH-06-2026-10-24T02-16-46.678097773Z` |
-| CH-07 | 30s; fault at 3s; pool 2 | **PASS** | 1,226 / 0 | Both pool producers fenced; full-capacity recovery confirmed; no record verification issues | `CH-07-2026-10-24T02-17-29.400900925Z` |
-| CH-08 | 40s; fault window 25s; poison interval 10s; pool 2 | **PASS** | 1,688 / 0 | Three rotating producer fences and three recoveries confirmed; no record verification issues | `CH-08-2026-10-24T02-19-02.736935507Z` |
-| CH-09 | 45s; fault at 3s; client partition 25s; pool 2 | **PASS** | 643 / 2 | Replacement recovery was exercised during the longer partition; network healed; no missing or duplicate acknowledged publishes | `CH-09-2026-10-24T02-20-36.569708886Z` |
-| CH-10 | 70s; fault at 10s; hold 40s; request timeout 10s; protocol listeners; pool 2 | **PASS** | 1,054 / 4 | Four correlated EndTxn responses and pre-fencing `CompleteCommit` state confirmed for both transactional IDs; zero missing, duplicate, partial, or replayed publishes | `chaos-results-ch10-fix-20261024/CH-10-2026-10-24T02-34-14.361441655Z` |
-| CH-11 | 30s; forced in-process pool restart; pool 2 | **PASS** | 1,218 / 0 | One restart completed; full capacity and record verification confirmed | `CH-11-2026-10-24T02-23-06.855083267Z` |
-| CH-12 | 30s; graceful in-process pool restart; pool 2 | **PASS** | 1,776 / 0 | One restart completed; full capacity and record verification confirmed | `CH-12-2026-10-24T02-23-42.446060885Z` |
-| CH-13 | 35s; three rolling restarts 10s apart; pool 2 | **PASS** | 1,691 / 0 | All three restarts completed; full capacity and record verification confirmed | `CH-13-2026-10-24T02-24-22.089623110Z` |
-| CH-14 | 45s; 15s transaction timeout; 20s transaction stall; pool 2 | **PASS** | 1,928 / 0 | Harness reported the timeout fault evidence and full capacity; no missing, duplicate, or partial publishes | `CH-14-2026-10-24T02-26-33.590901498Z` |
-| CH-15 | 35s; configured coordinator stop window 10s; pool 2 | **PASS** | 1,578 / 0 | Broker 1 stopped and restarted (6.7s observed between stop and restart); full-capacity recovery and record verification confirmed | `CH-15-2026-10-24T02-25-32.101152647Z` |
-
-All artifacts are under [`chaos-results-review-20261024/`](chaos-results-review-20261024/);
-[`summary.md`](chaos-results-review-20261024/summary.md) is the index. The
-final cleanup check found all Toxiproxy toxics removed and the CH-05/CH-10
-protocol proxy disarmed. The disposable containers, network, and volumes were
-then stopped and removed.
-
-Additional attempts are retained in the same summary. CH-09's first, shorter
-10-second partition was **INVALID/INCOMPLETE** because the pool never lost
-capacity; the 25-second partition above exercised the intended rebuild failure
-and passed. CH-10's initial run bypassed the protocol proxy; a subsequent
-protocol-aware run still captured state only after fencing and returned
-`Empty`. The corrected run now captures `CompleteCommit` before fencing and
-passes, as shown in
-[`chaos-results-ch10-fix-20261024/summary.md`](chaos-results-ch10-fix-20261024/summary.md).
-After applying the CH-10 correction, `mvn -Pchaos test` passed all 68 tests
-(0 failures, errors, or skips).
-CH-14's 6-second timeout run and a later
-shorter-duration repeat were **INVALID/INCOMPLETE** because they did not
-produce the required fencing evidence; the 45-second run with a 15-second
-transaction timeout did pass. The shorter-repeat variation means CH-14's pass
-should be treated as a successful run with a non-repeatable outcome observed,
-not as a stable result.
-
-These are observed results from the artifacts listed below, not promises about
-future runs or performance guarantees. “Committed” is the number of ledger
-transactions whose commit callback completed successfully. “Records” is the
-number of records found in the verifier's captured offset range. Each
-transaction contained 10 records in these runs. `read_uncommitted` can include
-records from aborted transactions, so its total is not expected to equal the
-`read_committed` total in MB-01.
-
-| Scenario | Parameters and fault | Counted result | Correctness result | Artifact and status |
-|---|---|---|---|---|
-| MB-01 | 120s; 2 topics; default deliberate abort every 10 publishes | 32,250 ledger outcomes: 29,029 committed, 3,221 aborted; 580,580 records read committed; 645,000 read uncommitted, including 64,420 aborted records | 0 missing, duplicate, partial, or cross-topic mismatches; aborted records absent from `read_committed` and present in `read_uncommitted` | `MB-01-2026-10-23T04-42-06.359142003Z` — **PASS** |
-| MB-02 | 30s; 12 partitions round-robin across 2 topics | 8,569 committed; 171,380 records under each isolation level; all 24 topic-partitions sampled | 0 ordering violations | `chaos-results-recheck/MB-02-2026-10-23T04-44-16.741371760Z` — **PASS** |
-| CH-01 | 180s; broker 1 restarted; preferred leader distribution 6/3/3 | 46,156 committed; 923,120 records under each isolation level | Restart and healthy recovery confirmed; 0 missing or duplicate records | `CH-01-2026-10-23T05-01-21.160003912Z` — **PASS** |
-| MB-03 | 60s; non-leader replica stopped for 20s | 15,403 committed; 154,030 records under each isolation level | Broker restart/recovery confirmed | `MB-03-2026-10-23T06-13-14.625158912Z` — **PASS** |
-| MB-04 | 60s; target partition leader stopped for 20s | 16,270 committed; 162,700 records under each isolation level | Broker restart/recovery confirmed | `MB-04-2026-10-23T06-14-27.406718152Z` — **PASS** |
-| CH-02 | 60s; producer blocked from one leader broker for 20s | 11,300 outcomes: 11,299 committed, 1 ambiguous; 112,990 read committed and 113,000 read uncommitted | No missing acknowledged records or duplicates; network healing confirmed | `CH-02-2026-10-23T06-15-35.404673402Z` — **PASS** |
-| CH-03 | 60s; producer blocked from all brokers for 20s | 8,180 outcomes: 8,172 committed, 8 ambiguous; 81,720 read committed and 81,780 read uncommitted | No missing acknowledged records or duplicates; network healing confirmed | `CH-03-2026-10-23T06-16-43.386937395Z` — **PASS** |
-| CH-04 | 215s; 2 workers; six blocked/healed cycles | 30,516 committed; 305,160 records under each isolation level | 6/6 faults healed; 0 missing, duplicate, partial, or cross-topic mismatches; blocked windows measured 9.6–11.6s and five healthy intervals 20.2–21.6s | `CH-04-2026-10-23T06-35-12.631653134Z` — **PASS** |
-| CH-05 | 70s; 40s response hold from second 10; one worker and one pool slot | 687 outcomes: 685 committed, 2 ambiguous (`TimeoutException`); 6,870 records under each isolation level | 4/4 EndTxn responses dropped with matching correlation IDs; broker state query reported `CompleteCommit`; 0 missing, duplicate, replayed, or pending outcomes; each ambiguous publish's 10 records were visible under both isolation levels | `CH-05-2026-10-23T08-11-43.581397410Z` — **PASS** |
-
-The earlier TCP-only CH-05 run
-(`CH-05-2026-10-23T06-17-54.870349108Z`) remains **INVALID/INCOMPLETE** and
-is retained as historical evidence. Other direct CH-05 attempts in
-`chaos-results/summary.md` are diagnostic and unqualified; the table's
-08:11:43 run is the only one with the complete protocol, ambiguity, broker
-state, and record-verification evidence. The artifact directory contains the run
-ID in each filename. The detailed
-assessment, including earlier harness defects and the historical AF-05
-interpretation, is in
-[`agentic-results/coverage-assessment-2026-10-23.md`](agentic-results/coverage-assessment-2026-10-23.md).
-Earlier diagnostic runs are retained in summaries; use the exact artifact IDs
-in this table when citing the corrected live results.
+The review-branch Docker campaign used cluster ID
+`5L6g3nShT-eMCtK--X86sw`. The disposable containers, network, and volumes were
+stopped and removed after the runs; Toxiproxy had zero active toxics and the
+protocol proxy was disarmed. Use the run IDs above when locating artifacts in
+the linked summaries.
 
 ## 4. Parameters: what they control and why they are used
 
@@ -373,53 +349,12 @@ multiplied by 20 records per transaction across two output topics. Those same
 aborted records must contribute zero to the committed view. When reporting a
 number, say which artifact field and which view it came from.
 
-## 7. Scenario catalog
+## 7. Reading the MB-01 isolation counts
 
-| ID | Scenario | Fault or purpose | Required hook |
-|---|---|---|---|
-| `MB-01` | Three-broker baseline | Transaction correctness and isolation baseline | None |
-| `MB-02` | Partition/leader distribution | Partition routing and per-partition sampling | None |
-| `MB-03` | Non-leader broker loss | Stop a non-leader replica for the target partition | Docker |
-| `MB-04` | Leader broker loss | Stop the target partition's leader | Docker |
-| `CH-01` | Leader-heavy broker restart | Restart a broker with more leaders during sustained load | Docker |
-| `CH-02` | One-broker network partition | Block producer traffic to one broker | `partition-broker` and `heal` |
-| `CH-03` | Full network partition | Block producer traffic to all brokers | `partition-cluster` and `heal` |
-| `CH-04` | Flapping network | Six cycles of 10s blocked and 20s healthy | `partition-cluster` and `heal` |
-| `CH-05` | Commit-response loss | Protocol-aware proxy forwards `EndTxn` requests and drops their correlated responses while armed | `chaos-protocol-proxy.sh arm` and `heal` |
-
-MB means multi-broker baseline/failure coverage; CH means chaos fault scenarios.
-The `AF-*` agentic hypothesis families propose these same fault primitives
-through an additional policy boundary. The planner does not execute directly:
-cluster identity, health, duration, load, telemetry, duplicate, budget, and
-cleanup checks must accept its typed plan first.
-
-### What each recorded scenario counted
-
-These counts come from the run artifacts in the results table above. A
-“committed transaction” is one whose commit callback completed successfully,
-as recorded in the transaction ledger; record totals are independent read-back
-from Kafka. The differences between
-the two isolation views are meaningful only together with the ledger and
-per-publish verification.
-
-| Scenario | How to read the counts | What the run demonstrates |
-|---|---|---|
-| MB-01 | 32,250 transactions split into 29,029 committed and 3,221 aborted. Each transaction wrote 10 records to each of 2 topics (20 total): 29,029 × 20 = 580,580 committed records; 3,221 × 20 = 64,420 aborted records. | `read_committed` returned 580,580; `read_uncommitted` returned 645,000 = 580,580 + 64,420. The aborted records were visible only to `read_uncommitted`; record-level verification found no missing, duplicate, partial, or cross-topic mismatch. |
-| MB-02 | 8,569 commits × 20 records across 2 topics = 171,380 records per isolation view. | All 24 topic-partitions (12 per topic) had samples, and the corrected per-partition/key ordering check found 0 violations. |
-| CH-01 | 46,156 commits × 20 records across 2 topics = 923,120 records per isolation view. | The leader-heavy broker (6 preferred leaders versus 3 each) restarted during the run and recovered; verification found no missing or duplicate records. |
-| MB-03 | 15,403 commits × 10 records = 154,030 records per isolation view while a non-leader replica was stopped for 20 seconds. | The non-leader broker restarted and recovered. The observed committed records were fully visible after read-back. |
-| MB-04 | 16,270 commits × 10 records = 162,700 records per isolation view while the target partition leader was stopped for 20 seconds. | A replacement leader served the partition and the stopped broker recovered. The observed committed records were fully visible after read-back. |
-| CH-02 | 11,300 outcomes: 11,299 committed and 1 ambiguous. The read-back contained 112,990 committed-view records and 113,000 uncommitted-view records. | Producer access to one leader broker was blocked for 20 seconds and healed. No acknowledged records were missing and no duplicates were found. The ambiguous outcome is reported separately; it is not counted as a confirmed commit. |
-| CH-03 | 8,180 outcomes: 8,172 committed and 8 ambiguous. The read-back contained 81,720 committed-view records and 81,780 uncommitted-view records. | Producer access to all brokers was blocked for 20 seconds and healed. No acknowledged records were missing and no duplicates were found. Ambiguous outcomes remain distinct from confirmed commits. |
-| CH-04 | 30,516 commits × 10 records = 305,160 records per isolation view over six partition/heal cycles. | All six faults healed. Measured blocked windows were 9.6–11.6 seconds and the five inter-cycle healthy intervals were 20.2–21.6 seconds; correctness checks found no missing, duplicate, partial, or cross-topic mismatch. |
-| CH-05 | 687 outcomes: 685 committed and 2 ambiguous (`TimeoutException`). Both read-back views contained 6,870 records; all 10 records from each ambiguous publish appeared in both views. | The proxy recorded 4 forwarded `EndTxn` requests and dropped all 4 broker responses with matching correlation IDs. The event log includes the parsed transactional ID and a Kafka coordinator query reporting `CompleteCommit` at producer epoch 2. There were 0 callback replays, missing records, duplicates, partial transactions, or pending transactions. The earlier TCP-only run remains invalid/incomplete. |
-
-### MB-01 count example: why the isolation totals differ
-
-The recorded MB-01 run wrote 32,250 transactions to two output topics. Each
-transaction contained 10 records in each topic, or 20 records total. Of those
-transactions, 29,029 committed and 3,221 were deliberately aborted to create a
-known isolation test case:
+MB-01 is a useful example of why a single total-record count is not enough.
+The run wrote 32,250 transactions to two output topics. Each transaction
+contained 10 records in each topic, or 20 records total. Of those transactions,
+29,029 committed and 3,221 were deliberately aborted:
 
 | Outcome | Calculation | Visible in `read_committed` | Visible in `read_uncommitted` |
 |---|---:|---:|---:|
@@ -427,12 +362,11 @@ known isolation test case:
 | Aborted | 3,221 × 20 = 64,420 records | 0 | 64,420 |
 | Total visible |  | **580,580** | **645,000** |
 
-So `read_uncommitted` sees 645,000 records: the 580,580 committed records
-plus 64,420 records from aborted transactions. `read_committed` hides those
-aborted records. This is the expected Kafka behavior, and the deliberate
-aborts make the test stronger than checking committed traffic alone. The
-verifier also matches publish IDs and record indexes; matching only the grand
-totals could hide one missing record balanced by one duplicate.
+`read_uncommitted` sees the committed records plus aborted records;
+`read_committed` hides the aborted records. The verifier also matches publish
+IDs and record indexes, so a missing record balanced by a duplicate cannot hide
+behind matching grand totals. The complete scenario catalog and result links
+are in [Section 3](#3-scenario-catalog-and-observed-results).
 
 ## 8. Fault and cleanup commands
 
