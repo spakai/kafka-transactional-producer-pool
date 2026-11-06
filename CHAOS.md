@@ -116,6 +116,26 @@ timer. Close may finish sooner; this test does not identify which internal
 Kafka shutdown work consumed the timeout. Broker expiry checks run every
 500ms in this disposable stack, so 100ms is not an exact exception deadline.
 
+#### Initializing replacement before closing the old producer
+
+`replacementWithSameTransactionalIdWorksBeforeOldProducerCloses` tests real
+Kafka producers with the same transactional ID while the old instance remains
+open, for both an ongoing transaction and an already expired transaction.
+The replacement initializes, establishes a new epoch, and commits a marker
+before the old producer is closed. The old instance's commit is rejected
+with a fatal fencing/epoch error. Closing it afterward must not prevent a
+second successful replacement transaction. Consumers must see both replacement
+markers under `read_committed`, but the old aborted record only under
+`read_uncommitted`.
+
+In one Docker run, replacement initialization took 225ms for the ongoing case
+and 117ms for the expired case, without waiting for old-producer close. Later
+close took 5ms and 2ms respectively. These are sample measurements, not
+latency guarantees. Both cases passed. This proves Kafka supports the ordering;
+it does not change the pool's current close-before-recovery implementation
+or validate concurrent pool shutdown/async cleanup. Old instances must still
+be closed and never returned to service.
+
 #### Running the timeout tests
 
 Run only against the dedicated disposable stack. The command below enables
