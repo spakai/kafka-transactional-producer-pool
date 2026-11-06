@@ -508,6 +508,92 @@ class BrokerTransactionExpiryTest {
         }
     }
 
+    @ParameterizedTest(name = "replacement initialized before old close, expired={0}")
+    @ValueSource(booleans = {false, true})
+    @Timeout(90)
+    void replacementWithSameTransactionalIdWorksBeforeOldProducerCloses(boolean expired) throws Exception {
+        String bootstrap = System.getProperty("brokerExpiry.bootstrapServers");
+        String id = UUID.randomUUID().toString();
+        String topic = "replacement-before-close-" + id;
+        String transactionalId = "replacement-before-close-" + id;
+        Properties properties = new Properties();
+        properties.setProperty("bootstrap.servers", bootstrap);
+        properties.setProperty("transactional.id", transactionalId);
+        properties.setProperty("transaction.timeout.ms", expired ? "1000" : "60000");
+        properties.setProperty("max.block.ms", "10000");
+        properties.setProperty("key.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
+        properties.setProperty("value.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
+
+        try (Admin admin = Admin.create(Map.of(
+                "bootstrap.servers", bootstrap,
+                "request.timeout.ms", "5000",
+                "default.api.timeout.ms", "10000"))) {
+            admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1)))
+                    .all().get(10, TimeUnit.SECONDS);
+            try {
+                try (KafkaProducer<byte[], byte[]> old = new KafkaProducer<>(properties)) {
+                    old.initTransactions();
+                    old.beginTransaction();
+                    old.send(new ProducerRecord<>(topic, bytes("old-uncommitted")))
+                            .get(10, TimeUnit.SECONDS);
+                    if (expired) {
+                        awaitBrokerAbort(admin, transactionalId);
+                    } else {
+                        assertEquals(TransactionState.ONGOING,
+                                admin.describeTransactions(List.of(transactionalId))
+                                        .description(transactionalId).get(5, TimeUnit.SECONDS).state());
+                    }
+                    var previous = admin.describeTransactions(List.of(transactionalId))
+                            .description(transactionalId).get(5, TimeUnit.SECONDS);
+                    Properties replacementProperties = new Properties();
+                    replacementProperties.putAll(properties);
+                    replacementProperties.setProperty("transaction.timeout.ms", "60000");
+                    try (KafkaProducer<byte[], byte[]> replacement = new KafkaProducer<>(replacementProperties)) {
+                        long started = System.nanoTime();
+                        replacement.initTransactions();
+                        long initializedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+                        var current = admin.describeTransactions(List.of(transactionalId))
+                                .description(transactionalId).get(5, TimeUnit.SECONDS);
+                        assertTrue(current.producerId() != previous.producerId()
+                                        || current.producerEpoch() > previous.producerEpoch(),
+                                "Replacement must establish a new producer identity or epoch");
+
+                        RuntimeException rejected = assertThrows(RuntimeException.class, old::commitTransaction);
+                        assertTrue(rejected instanceof ProducerFencedException
+                                        || rejected instanceof InvalidProducerEpochException,
+                                () -> "Old instance must be fenced: " + rejected);
+                        replacement.beginTransaction();
+                        replacement.send(new ProducerRecord<>(topic, bytes("before-old-close")))
+                                .get(10, TimeUnit.SECONDS);
+                        replacement.commitTransaction();
+                        System.out.printf("Replacement-before-close: expired=%s, initMs=%d, "
+                                        + "oldEpoch=%d, replacementEpoch=%d, oldCommit=%s, "
+                                        + "replacementCommitWhileOldOpen=SUCCESS%n",
+                                expired, initializedMs, previous.producerEpoch(), current.producerEpoch(),
+                                rejected.getClass().getSimpleName());
+
+                        long closing = System.nanoTime();
+                        old.close(Duration.ofSeconds(5));
+                        long closeMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - closing);
+                        replacement.beginTransaction();
+                        replacement.send(new ProducerRecord<>(topic, bytes("after-old-close")))
+                                .get(10, TimeUnit.SECONDS);
+                        replacement.commitTransaction();
+                        assertEquals(List.of("before-old-close", "after-old-close"),
+                                readToEnd(bootstrap, topic, "read_committed"));
+                        assertEquals(List.of("old-uncommitted", "before-old-close", "after-old-close"),
+                                readToEnd(bootstrap, topic, "read_uncommitted"));
+                        System.out.printf("Replacement-before-close: expired=%s, oldCloseMs=%d, "
+                                        + "replacementCommitAfterOldClose=SUCCESS, read_committed=2, read_uncommitted=3%n",
+                                expired, closeMs);
+                    }
+                }
+            } finally {
+                admin.deleteTopics(List.of(topic)).all().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     private static void recordSendFailure(KafkaException failure, Map<String, Integer> failures,
                                           AtomicReference<KafkaException> firstFailure, AtomicLong firstFailureAt) {
         failures.merge(failure.getClass().getSimpleName(), 1, Integer::sum);
