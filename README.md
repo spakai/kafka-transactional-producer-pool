@@ -482,6 +482,32 @@ Use the following layers:
 | Infrastructure chaos | Three-broker chaos environment / Kubernetes chaos tooling | Broker crash, coordinator failover, leader election, pod restart, network partition |
 | Performance | JMH and the `perf` profile | Pool overhead, lease contention, transaction hot path, producer-pool sizing and throughput |
 
+#### Transaction expiry versus client timeout
+
+`transaction.timeout.ms` limits the lifetime of an open transaction at the
+broker; it is not a producer quarantine duration. Broker expiry is detected
+periodically, so a 100ms setting does not guarantee an exception at exactly
+100ms. In the Docker tests, expiry during sending produced
+`InvalidProducerEpochException`; the invalidated producer must be replaced.
+
+A client `TimeoutException` from `commitTransaction()` instead means the
+client stopped waiting (`max.block.ms`); it does not prove broker abort or
+permanent producer invalidation. The raw-producer test successfully retried
+the same pending commit and reused that producer without resending records.
+The pool retains its conservative policy of evicting on commit timeout.
+Replacement does not resolve an ambiguous transaction's business outcome.
+
+Pool recovery begins after a fatal error reaches the managed transaction
+callback's error path. Failed send futures must be observed and their Kafka
+cause propagated; broker expiry alone does not notify the pool to rebuild.
+Eviction closes the old producer synchronously with a five-second maximum
+before scheduling replacement. The replacement uses the same transactional
+ID and becomes available only after `initTransactions()` succeeds. There is
+no deliberate cooldown tied to `transaction.timeout.ms`.
+
+See the [Docker timeout and pool-rebuild tests](CHAOS.md#broker-transaction-expiry-tx-06)
+for commands, observed results, and send-phase coverage up to one million records.
+
 #### Failure scenarios to cover
 
 | ID | Failure to reproduce | How to trigger it | Expected behavior |

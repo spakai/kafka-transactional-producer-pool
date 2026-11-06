@@ -59,8 +59,6 @@ adding `-DbrokerExpiry.testCommitTimeout=true` to the Maven command below.
 This test requires the exact `localhost:49092` endpoint and Docker Compose
 access; it does not change the pool's conservative commit-timeout eviction policy.
 
-Run only against the dedicated disposable stack:
-
 The suite also attempts 10,000 small records with `transaction.timeout.ms=3000`
 and 100,000 small records with `transaction.timeout.ms=1000`, plus 500,000
 small records with `transaction.timeout.ms=500` and 1,000,000 with
@@ -92,11 +90,51 @@ continuation of sends delays propagation, and old-producer close can add up to
 five seconds before recovery is scheduled. Merely receiving an asynchronous
 send error does not trigger pool eviction until the callback surfaces it.
 
+#### Observed pool rebuild timeline
+
+One Docker run with Kafka client 3.6.1 and broker 3.7.0 produced the following
+timestamps relative to workload start:
+
+| Event | Observed time |
+|---|---:|
+| First send error observed | 203ms |
+| Callback propagated the fatal error after all million attempts | 6,515ms |
+| Replacement factory invoked | 11,520ms |
+| Replacement observed READY | 11,729ms |
+
+That run acknowledged 41,000 sends and rejected 959,000 with
+`InvalidProducerEpochException`. The broker reported `COMPLETE_ABORT`, the
+failed workload committed zero times, and exactly one replacement subsequently
+committed the marker. Only the marker was visible to `read_committed`.
+The complete chaos-profile run passed 60 tests, including all nine opt-in
+Docker cases.
+
+These counts and timings depend on scheduling, broker expiry scans, payloads,
+and load. The roughly five-second gap after callback propagation comes from
+`producer.close(Duration.ofSeconds(5))` in the eviction path, not a quarantine
+timer. Close may finish sooner; this test does not identify which internal
+Kafka shutdown work consumed the timeout. Broker expiry checks run every
+500ms in this disposable stack, so 100ms is not an exact exception deadline.
+
+#### Running the timeout tests
+
+Run only against the dedicated disposable stack. The command below enables
+all timeout cases, including pausing the broker for the client commit test:
+
 ```bash
 docker compose -f docker-compose.transaction-expiry.yml up -d --wait
 mvn -Pchaos -Dtest=BrokerTransactionExpiryTest \
-  -DbrokerExpiry.bootstrapServers=localhost:49092 test
+  -DbrokerExpiry.bootstrapServers=localhost:49092 \
+  -DbrokerExpiry.testCommitTimeout=true test
 docker compose -f docker-compose.transaction-expiry.yml down -v
+```
+
+For just the real-pool million-record send-phase test, use:
+
+```bash
+mvn -Pchaos \
+  '-Dtest=BrokerTransactionExpiryTest#millionRecordSendFailureTriggersActualPoolReplacementBeforeCommit' \
+  -DbrokerExpiry.bootstrapServers=localhost:49092 test
 ```
 
 Always run the cleanup command, including after a failed test. Without the
