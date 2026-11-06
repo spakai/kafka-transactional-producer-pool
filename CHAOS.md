@@ -24,6 +24,56 @@ The comparison is the key idea: a successful callback alone does not prove
 that every expected record is present exactly once, and a broker being healthy
 again does not prove that the application recovered correctly.
 
+### Broker transaction expiry (TX-06)
+
+This opt-in integration test uses a separate disposable single-broker Docker
+stack, not the three-broker fault-injection stack. It sets
+`transaction.timeout.ms=3000` and the broker's expired-transaction cleanup
+interval to 500ms. No production timeout settings are changed.
+
+The test sends a record, waits for the broker's transaction description to report
+`COMPLETE_ABORT` **before** attempting commit, and checks that commit fails with
+an epoch/fencing error rather than a client response timeout. It then verifies
+pool replacement using the same transactional ID and a successful subsequent
+transaction. A `read_uncommitted` consumer must see both records, while a
+`read_committed` consumer must see only the subsequent committed record.
+
+Two additional parameterized cases bypass the pool and keep the original
+`KafkaProducer`: one attempts commit after expiry, the other attempts abort
+without first committing. With Kafka client 3.6.1 and broker 3.7.0, both paths
+produce a fatal epoch/fencing rejection. Subsequent `abortTransaction()`,
+`beginTransaction()`, and `initTransactions()` calls on that same instance are
+also rejected. The tests print the actual exceptions in the Maven output.
+Aborted records remain invisible to `read_committed` consumers in both cases.
+There is deliberately no production replacement-disable flag: `COMPLETE_ABORT`
+describes broker transaction state, not permission to reuse a fenced producer.
+
+An additional opt-in test distinguishes client commit timeout from broker
+expiry. It pauses only this dedicated Docker broker after the first send is
+acknowledged, uses `max.block.ms=3000` with `transaction.timeout.ms=60000`,
+and requires `commitTransaction()` to throw Kafka `TimeoutException`. It resumes
+the broker in a finally block, retries only the same commit on the same producer,
+checks `COMPLETE_COMMIT`, then commits another transaction with that instance.
+Both consumer isolation levels must see each record exactly once. Enable it by
+adding `-DbrokerExpiry.testCommitTimeout=true` to the Maven command below.
+This test requires the exact `localhost:49092` endpoint and Docker Compose
+access; it does not change the pool's conservative commit-timeout eviction policy.
+
+Run only against the dedicated disposable stack:
+
+```bash
+docker compose -f docker-compose.transaction-expiry.yml up -d --wait
+mvn -Pchaos -Dtest=BrokerTransactionExpiryTest \
+  -DbrokerExpiry.bootstrapServers=localhost:49092 test
+docker compose -f docker-compose.transaction-expiry.yml down -v
+```
+
+Always run the cleanup command, including after a failed test. Without the
+`brokerExpiry.bootstrapServers` property, this test is skipped by ordinary chaos
+test runs. It creates a unique topic and transactional ID per run and deletes
+the topic afterward. Broker expiry is checked with a bounded wait, not assumed
+from elapsed wall-clock time alone.
+
 ### Local topology
 
 ```mermaid
