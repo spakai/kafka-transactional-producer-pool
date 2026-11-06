@@ -10,6 +10,7 @@ import org.apache.kafka.clients.admin.TransactionState;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InvalidProducerEpochException;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,7 +32,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -267,12 +277,100 @@ class BrokerTransactionExpiryTest {
         assertEquals(0, process.exitValue(), "Docker broker control failed: " + action);
     }
 
+    @ParameterizedTest(name = "send-only recordCount={0}, transactionTimeoutMs={1}")
+    @CsvSource({"10000,3000", "100000,1000", "500000,500", "1000000,100"})
+    @Timeout(90)
+    void sendsRecordsWithoutCommitAndObservesExpiry(int recordCount, int transactionTimeoutMs) throws Exception {
+        String bootstrap = System.getProperty("brokerExpiry.bootstrapServers");
+        String id = UUID.randomUUID().toString();
+        String topic = "send-only-" + id;
+        String transactionalId = "send-only-" + id;
+        Properties properties = new Properties();
+        properties.setProperty("bootstrap.servers", bootstrap);
+        properties.setProperty("transactional.id", transactionalId);
+        properties.setProperty("transaction.timeout.ms", Integer.toString(transactionTimeoutMs));
+        properties.setProperty("max.block.ms", "10000");
+        properties.setProperty("key.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
+        properties.setProperty("value.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
+
+        try (Admin admin = Admin.create(Map.of(
+                "bootstrap.servers", bootstrap,
+                "request.timeout.ms", "5000",
+                "default.api.timeout.ms", "10000"))) {
+            admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1)))
+                    .all().get(10, TimeUnit.SECONDS);
+            try {
+                try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(properties)) {
+                    producer.initTransactions();
+                    AtomicInteger acknowledgmentCount = new AtomicInteger();
+                    AtomicInteger failureCount = new AtomicInteger();
+                    Map<String, Integer> failures = new ConcurrentHashMap<>();
+                    producer.beginTransaction();
+                    long started = System.nanoTime();
+                    for (int i = 0; i < recordCount; i++) {
+                        AtomicBoolean completed = new AtomicBoolean();
+                        try {
+                            producer.send(new ProducerRecord<>(topic, bytes("record-" + i)), (metadata, error) -> {
+                                if (!completed.compareAndSet(false, true)) {
+                                    return;
+                                }
+                                if (error == null) {
+                                    acknowledgmentCount.incrementAndGet();
+                                } else {
+                                    failures.merge(error.getClass().getSimpleName(), 1, Integer::sum);
+                                    failureCount.incrementAndGet();
+                                }
+                            });
+                        } catch (KafkaException error) {
+                            if (completed.compareAndSet(false, true)) {
+                                failures.merge(error.getClass().getSimpleName(), 1, Integer::sum);
+                                failureCount.incrementAndGet();
+                            }
+                        }
+                    }
+                    long queuedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+                    await().atMost(Duration.ofSeconds(30)).until(() ->
+                            acknowledgmentCount.get() + failureCount.get() == recordCount);
+                    int acknowledged = acknowledgmentCount.get();
+                    long acknowledgedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+                    assertEquals(recordCount, acknowledged + failures.values().stream().mapToInt(Integer::intValue).sum());
+                    TransactionState state = admin.describeTransactions(List.of(transactionalId))
+                            .description(transactionalId).get(5, TimeUnit.SECONDS).state();
+                    System.out.printf("Send-only workload: attempted=%d, acknowledged=%d, failures=%s, "
+                                    + "queuedMs=%d, acknowledgedMs=%d, brokerStateBeforeCleanup=%s, "
+                                    + "transaction.timeout.ms=%d, commitCalls=0%n",
+                            recordCount, acknowledged, failures, queuedMs, acknowledgedMs, state,
+                            transactionTimeoutMs);
+                    assertTrue(state == TransactionState.ONGOING
+                                    || state == TransactionState.PREPARE_ABORT
+                                    || state == TransactionState.COMPLETE_ABORT,
+                            () -> "Unexpected send-only transaction state: " + state);
+                    try {
+                        producer.abortTransaction();
+                        System.out.println("Send-only cleanup: explicit abort succeeded");
+                    } catch (ProducerFencedException | InvalidProducerEpochException error) {
+                        System.out.println("Send-only cleanup: producer invalidated by broker expiry: " + error);
+                        awaitBrokerAbort(admin, transactionalId);
+                    }
+                    List<String> uncommitted = readToEnd(bootstrap, topic, "read_uncommitted");
+                    assertTrue(uncommitted.size() >= acknowledged && uncommitted.size() <= recordCount);
+                    assertEquals(List.of(), readToEnd(bootstrap, topic, "read_committed"));
+                    System.out.printf("Send-only verification after abort: read_uncommitted=%d, read_committed=0%n",
+                            uncommitted.size());
+                }
+            } finally {
+                admin.deleteTopics(List.of(topic)).all().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     private static List<String> readToEnd(String bootstrap, String topic, String isolation) {
         Properties properties = new Properties();
         properties.setProperty("bootstrap.servers", bootstrap);
         properties.setProperty("key.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
         properties.setProperty("value.deserializer", "org.apache.kafka.common.serialization.ByteArrayDeserializer");
         properties.setProperty("enable.auto.commit", "false");
+        properties.setProperty("max.poll.records", "5000");
         properties.setProperty("isolation.level", isolation);
         properties.setProperty("default.api.timeout.ms", "10000");
         TopicPartition partition = new TopicPartition(topic, 0);
@@ -281,14 +379,141 @@ class BrokerTransactionExpiryTest {
             consumer.assign(List.of(partition));
             consumer.seekToBeginning(List.of(partition));
             long end = consumer.endOffsets(List.of(partition)).get(partition);
-            assertTrue(end > 0, "Test topic must contain records");
-            await().atMost(Duration.ofSeconds(15)).until(() -> {
+            assertTrue(end >= 0, "End offset must be non-negative");
+            await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(10)).until(() -> {
                 consumer.poll(Duration.ofMillis(200)).forEach(record ->
                         values.add(new String(record.value(), StandardCharsets.UTF_8)));
                 return consumer.position(partition) >= end;
             });
         }
         return values;
+    }
+
+    @Test
+    @Timeout(120)
+    void millionRecordSendFailureTriggersActualPoolReplacementBeforeCommit() throws Exception {
+        String bootstrap = System.getProperty("brokerExpiry.bootstrapServers");
+        String id = UUID.randomUUID().toString();
+        String topic = "pool-send-expiry-" + id;
+        Properties properties = new Properties();
+        properties.setProperty("bootstrap.servers", bootstrap);
+        properties.setProperty("transaction.timeout.ms", "100");
+        properties.setProperty("max.block.ms", "10000");
+        PoolConfig config = PoolConfig.builder()
+                .poolSize(1)
+                .serviceIdentity("pool-send-expiry")
+                .instanceIdentifier(id)
+                .leaseHardTimeoutMs(90_000)
+                .kafkaProperties(properties)
+                .build();
+        List<KafkaProducer<byte[], byte[]>> created = new CopyOnWriteArrayList<>();
+        AtomicLong replacementStarted = new AtomicLong();
+        AtomicLong firstFailureAt = new AtomicLong();
+        AtomicInteger callbackCalls = new AtomicInteger();
+        AtomicInteger acknowledged = new AtomicInteger();
+        Map<String, Integer> failures = new ConcurrentHashMap<>();
+        AtomicReference<KafkaException> firstFailure = new AtomicReference<>();
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        DefaultKafkaProducerFactory delegate = new DefaultKafkaProducerFactory();
+        TransactionalProducerPool pool = new TransactionalProducerPool(config, props -> {
+            if (!created.isEmpty()) {
+                replacementStarted.set(System.nanoTime());
+            }
+            KafkaProducer<byte[], byte[]> producer = delegate.create(props);
+            created.add(producer);
+            return producer;
+        }, registry);
+
+        try (Admin admin = Admin.create(Map.of(
+                "bootstrap.servers", bootstrap,
+                "request.timeout.ms", "5000",
+                "default.api.timeout.ms", "10000"))) {
+            admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1)))
+                    .all().get(10, TimeUnit.SECONDS);
+            try {
+                pool.initialize();
+                long started = System.nanoTime();
+                RuntimeException error = assertThrows(RuntimeException.class, () ->
+                        pool.executeInTransaction(lease -> {
+                            callbackCalls.incrementAndGet();
+                            List<Future<RecordMetadata>> pending = new ArrayList<>(1000);
+                            for (int i = 0; i < 1_000_000; i++) {
+                                try {
+                                    pending.add(lease.send(new ProducerRecord<>(topic, bytes("record-" + i))));
+                                } catch (KafkaException failure) {
+                                    recordSendFailure(failure, failures, firstFailure, firstFailureAt);
+                                }
+                                // Bound retained futures while still observing every asynchronous send result.
+                                if (pending.size() == 1000 || i == 999_999) {
+                                    for (Future<RecordMetadata> send : pending) {
+                                        try {
+                                            send.get(10, TimeUnit.SECONDS);
+                                            acknowledged.incrementAndGet();
+                                        } catch (ExecutionException failure) {
+                                            assertTrue(failure.getCause() instanceof KafkaException,
+                                                    () -> "Unexpected send failure: " + failure);
+                                            recordSendFailure((KafkaException) failure.getCause(),
+                                                    failures, firstFailure, firstFailureAt);
+                                        }
+                                    }
+                                    pending.clear();
+                                }
+                            }
+                            assertTrue(firstFailure.get() instanceof InvalidProducerEpochException
+                                            || firstFailure.get() instanceof ProducerFencedException,
+                                    () -> "Expected send-phase expiry; failures=" + failures);
+                            awaitBrokerAbort(admin, lease.getTransactionalId());
+                            assertEquals(1, created.size(), "No replacement until callback propagates the failure");
+                            System.out.printf("Actual pool: attempted=1000000, acknowledged=%d, failures=%s, "
+                                            + "brokerState=COMPLETE_ABORT, firstSendErrorMs=%d, "
+                                            + "propagatingSendErrorMs=%d, replacementsBeforePropagation=0%n",
+                                    acknowledged.get(), failures,
+                                    TimeUnit.NANOSECONDS.toMillis(firstFailureAt.get() - started),
+                                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+                            throw firstFailure.get();
+                        }));
+                assertTrue(error == firstFailure.get(), "Pool must surface the original send failure");
+                assertEquals(1, callbackCalls.get(), "Failed workload must not be replayed");
+                assertEquals(1_000_000,
+                        acknowledged.get() + failures.values().stream().mapToInt(Integer::intValue).sum());
+                assertEquals(0.0, registry.get("transaction_commit_total").counter().count());
+                await().atMost(Duration.ofSeconds(15)).until(() -> pool.getReadyCount() == 1);
+                assertEquals(2, created.size(), "Exactly one replacement producer");
+                assertTrue(created.get(0) != created.get(1), "Replacement must be a new producer instance");
+                assertEquals(1.0, registry.get("producer_recovery_total")
+                        .tag("outcome", "SUCCESS").counter().count());
+                System.out.printf("Actual pool: replacementCreateMs=%d, replacementReadyObservedMs=%d, "
+                                + "failedWorkloadCommitCount=0, ready=%d, leased=%d%n",
+                        TimeUnit.NANOSECONDS.toMillis(replacementStarted.get() - started),
+                        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
+                        pool.getReadyCount(), pool.getLeasedCount());
+
+                pool.executeInTransaction(lease -> {
+                    assertEquals(config.buildTransactionalId(0), lease.getTransactionalId());
+                    lease.send(new ProducerRecord<>(topic, bytes("replacement-committed")))
+                            .get(10, TimeUnit.SECONDS);
+                    return null;
+                });
+                assertEquals(List.of("replacement-committed"), readToEnd(bootstrap, topic, "read_committed"));
+                assertEquals(1, pool.getTotalCount());
+                assertEquals(1, pool.getReadyCount());
+                assertEquals(0, pool.getLeasedCount());
+                System.out.println("Actual pool: replacement committed successfully; read_committed saw only replacement-committed");
+            } finally {
+                pool.shutdown();
+                admin.deleteTopics(List.of(topic)).all().get(10, TimeUnit.SECONDS);
+            }
+        } finally {
+            registry.close();
+        }
+    }
+
+    private static void recordSendFailure(KafkaException failure, Map<String, Integer> failures,
+                                          AtomicReference<KafkaException> firstFailure, AtomicLong firstFailureAt) {
+        failures.merge(failure.getClass().getSimpleName(), 1, Integer::sum);
+        if (firstFailure.compareAndSet(null, failure)) {
+            firstFailureAt.set(System.nanoTime());
+        }
     }
 
     private static byte[] bytes(String value) {

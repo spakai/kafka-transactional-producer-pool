@@ -61,6 +61,37 @@ access; it does not change the pool's conservative commit-timeout eviction polic
 
 Run only against the dedicated disposable stack:
 
+The suite also attempts 10,000 small records with `transaction.timeout.ms=3000`
+and 100,000 small records with `transaction.timeout.ms=1000`, plus 500,000
+small records with `transaction.timeout.ms=500` and 1,000,000 with
+`transaction.timeout.ms=100`, each as fast as
+possible in a single transaction, without calling commit or deliberately
+slowing sends. It prints queue/acknowledgment times, acknowledgment
+and failure counts, and broker state before cleanup. A fast run may finish
+before expiry; record count alone does not force a transaction timeout. Cleanup
+explicitly aborts the transaction (or observes broker abort if already fenced),
+then verifies that no records are visible to `read_committed` consumers.
+
+`millionRecordSendFailureTriggersActualPoolReplacementBeforeCommit` repeats
+the million-record/100ms case through the actual single-slot pool and real Kafka
+factory. It observes send futures in bounded batches of 1,000, so its throughput
+is not directly comparable to the raw producer callback-counting test. It
+finishes all million attempts, confirms `COMPLETE_ABORT`, then propagates the
+original Kafka send error from the transaction callback (unwrapping
+`ExecutionException` from failed futures). The failed workload never reaches
+commit and is not replayed.
+
+The test asserts that no replacement exists before the callback propagates the
+error, then verifies a distinct producer instance, exactly one successful
+recovery, the same transactional ID, reconciled pool counts, and a successful
+subsequent committed marker. A `read_committed` consumer must see only that
+marker. Output timestamps show first observed send error, callback propagation,
+replacement creation, and observed READY state, all relative to workload start.
+These are measured observations, not recovery deadlines: the deliberate
+continuation of sends delays propagation, and old-producer close can add up to
+five seconds before recovery is scheduled. Merely receiving an asynchronous
+send error does not trigger pool eviction until the callback surfaces it.
+
 ```bash
 docker compose -f docker-compose.transaction-expiry.yml up -d --wait
 mvn -Pchaos -Dtest=BrokerTransactionExpiryTest \
